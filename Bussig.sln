@@ -1,8 +1,31 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Bussig.Postgres", "src\Bussig.Postgres\Bussig.Postgres.csproj", "{E7D4E7B6-A289-4F3A-91AA-3EE503067C53}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Bussig.Core", "src\Bussig.Core\Bussig.Core.csproj", "{02DE2C15-5CCA-47A3-8629-7D6C1B78FEB8}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution Items", "{C1896508-A0BC-41BD-B793-938EB40F819D}"
+	ProjectSection(SolutionItems) = preProject
+		.gitattributes = .gitattributes
+		.gitignore = .gitignore
+		LICENSE = LICENSE
+		Directory.Build.props = Directory.Build.props
+		README.md = README.md
+	EndProjectSection
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
 		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{E7D4E7B6-A289-4F3A-91AA-3EE503067C53}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{E7D4E7B6-A289-4F3A-91AA-3EE503067C53}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{E7D4E7B6-A289-4F3A-91AA-3EE503067C53}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{E7D4E7B6-A289-4F3A-91AA-3EE503067C53}.Release|Any CPU.Build.0 = Release|Any CPU
+		{02DE2C15-5CCA-47A3-8629-7D6C1B78FEB8}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{02DE2C15-5CCA-47A3-8629-7D6C1B78FEB8}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{02DE2C15-5CCA-47A3-8629-7D6C1B78FEB8}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{02DE2C15-5CCA-47A3-8629-7D6C1B78FEB8}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal
