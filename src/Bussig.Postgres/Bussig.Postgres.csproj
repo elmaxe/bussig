@@ -1,14 +1,14 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <PackageReference Include="Npgsql" Version="10.0.0" />
+  </ItemGroup>
 
-    <PropertyGroup>
-    </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Bussig.Core\Bussig.Core.csproj" />
+  </ItemGroup>
 
-    <ItemGroup>
-      <PackageReference Include="Npgsql" Version="10.0.0" />
-    </ItemGroup>
-
-    <ItemGroup>
-      <ProjectReference Include="..\Bussig.Core\Bussig.Core.csproj" />
-    </ItemGroup>
-
+  <ItemGroup>
+    <InternalsVisibleTo Include="Bussig.Postgres.Tests.Unit" />
+    <InternalsVisibleTo Include="Bussig.Postgres.Tests.Integration" />
+  </ItemGroup>
 </Project>

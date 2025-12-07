@@ -2,7 +2,7 @@
 Postgres Message Bus for .NET
 
 ```postgresql
-bussig.queues_metadata (
+bussig.metadata (
     queue_id    UUID PRIMARY KEY,
     name        TEXT NOT NULL UNIQUE,
     dead_letter_queue_id UUID NOT NULL REFERENCES queues(queue_id) --possibly
@@ -27,6 +27,7 @@ bussig.queue_{name} (
 ```
 
 - Queues, dead letter queues
+- Manual or automatic queue name/topic creation
 - Ability to delay re-processing of message when abandoning. Backoff setting.
 - Topics/subscription and DL. One subscriptions table holds topic and subscribers. One subscription events table holds topic, subscriber and payload
 ```postgresql
@@ -50,7 +51,7 @@ subscription_events (
 );
 ```
 - Possibly async fan out (one insert into topic outbox)
-- Polling: poll messages, poll health check
+- Polling: poll messages, poll health check. Option for using notify/listen?
 - Request/reply
 - Support for pgbouncer (transaction mode vs prepared statements)
 - Inbox/outbox
