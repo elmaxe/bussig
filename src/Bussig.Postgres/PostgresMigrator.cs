@@ -80,8 +80,8 @@ public class PostgresMigrator(NpgsqlDataSource npgsqlDataSource, ILogger<Postgre
             BEGIN
                 {(
                 options.PostgresVersion >= PostgresVersion.Pg18
-                    ? "SELECT pg_catalog.uuidv7()"
-                    : "SELECT pg_catalog.gen_random_uuid()"
+                    ? "RETURN pg_catalog.uuidv7()"
+                    : "RETURN pg_catalog.gen_random_uuid()"
             )};
             END;
             $$ LANGUAGE plpgsql;
@@ -102,7 +102,7 @@ public class PostgresMigrator(NpgsqlDataSource npgsqlDataSource, ILogger<Postgre
 
             CREATE UNIQUE INDEX IF NOT EXISTS queues_idx_name_type ON "{0}".queues (name, type);
 
-            CREATE TABLE IF NOT EXISTS "{0}".message (
+            CREATE TABLE IF NOT EXISTS "{0}".messages (
                     message_id              UUID            NOT NULL PRIMARY KEY
                 ,   body                    BYTEA           NULL
                 ,   headers                 JSONB           NULL
@@ -111,7 +111,7 @@ public class PostgresMigrator(NpgsqlDataSource npgsqlDataSource, ILogger<Postgre
 
             CREATE TABLE IF NOT EXISTS "{0}".message_delivery (
                     message_delivery_id     BIGINT          PRIMARY KEY GENERATED ALWAYS AS IDENTITY
-                ,   message_id              UUID            REFERENCES "{0}".message(message_id)
+                ,   message_id              UUID            REFERENCES "{0}".messages(message_id)
                 ,   queue_id                BIGINT          REFERENCES "{0}".queues(queue_id)
                 ,   priority                SMALLINT        NOT NULL --low is high prio
                 ,   visible_at              TIMESTAMPTZ     NOT NULL DEFAULT (NOW() AT TIME ZONE 'utc')
@@ -144,7 +144,7 @@ public class PostgresMigrator(NpgsqlDataSource npgsqlDataSource, ILogger<Postgre
                 v_visible_at            TIMESTAMPTZ;
                 v_enqueued_at           TIMESTAMPTZ;
             BEGIN
-                SELECT INTO v_queue_id, v_max_delivery_count q.queue_id, q.max_delivery_count FROM "{0}".queues q WHERE name = queue_name AND type = 1;
+                SELECT q.queue_id, q.max_delivery_count INTO v_queue_id, v_max_delivery_count FROM "{0}".queues q WHERE q.name = queue_name AND q.type = 1;
                 
                 IF v_queue_id IS NULL THEN
                     RAISE EXCEPTION 'Queue not found';
@@ -156,7 +156,7 @@ public class PostgresMigrator(NpgsqlDataSource npgsqlDataSource, ILogger<Postgre
                     v_visible_at = v_visible_at + delay;
                 END IF;
                 
-                INSERT INTO "{0}".message(message_id, body, headers, message_version)
+                INSERT INTO "{0}".messages(message_id, body, headers, message_version)
                 VALUES (send_message.message_id, send_message.body, send_message.headers, send_message.message_version);
                 
                 INSERT INTO "{0}".message_delivery(message_id, queue_id, priority, visible_at, enqueued_at, delivery_count, max_delivery_count, expiration_time)

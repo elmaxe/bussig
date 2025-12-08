@@ -1,12 +1,49 @@
+using System.Collections.Concurrent;
 using Microsoft.Extensions.Logging;
 using Moq;
 using Npgsql;
 using Testcontainers.PostgreSql;
+using TUnit.Core.Interfaces;
 
 namespace Bussig.Postgres.Tests.Integration.PostgresMigrator;
 
+public sealed class PostgresContainerPool : IAsyncInitializer, IAsyncDisposable
+{
+    private readonly ConcurrentDictionary<string, PostgreSqlContainer> _containers = new();
+
+    public async Task<PostgreSqlContainer> GetContainerAsync(
+        string image = "postgres:18",
+        CancellationToken ct = default
+    )
+    {
+        var container = _containers.GetOrAdd(
+            image,
+            img => new PostgreSqlBuilder().WithImage(img).Build()
+        );
+        await container.StartAsync(ct);
+
+        return container;
+    }
+
+    public Task InitializeAsync()
+    {
+        return Task.CompletedTask;
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        foreach (var container in _containers.Values)
+        {
+            await container.DisposeAsync();
+        }
+    }
+}
+
 public class CreateInfrastructureTests
 {
+    [ClassDataSource<PostgresContainerPool>(Shared = SharedType.PerClass)]
+    public required PostgresContainerPool Containers { get; set; }
+
     [Test]
     [Arguments("postgres:15")]
     [Arguments("postgres:16")]
@@ -15,8 +52,7 @@ public class CreateInfrastructureTests
     public async Task RunsForSupportedVersions(string image)
     {
         // Arrange
-        await using var container = new PostgreSqlBuilder().WithImage(image).Build();
-        await container.StartAsync();
+        var container = await Containers.GetContainerAsync(image);
 
         var target = new Postgres.PostgresMigrator(
             NpgsqlDataSource.Create(container.GetConnectionString()),
@@ -32,5 +68,35 @@ public class CreateInfrastructureTests
         // Assert
         using var _ = Assert.Multiple();
         await Assert.That(action).ThrowsNothing();
+    }
+
+    [Test]
+    public async Task WithOptions_RespectsSchema()
+    {
+        // Arrange
+        var container = await Containers.GetContainerAsync();
+
+        var target = new Postgres.PostgresMigrator(
+            NpgsqlDataSource.Create(container.GetConnectionString()),
+            Mock.Of<ILogger<Postgres.PostgresMigrator>>()
+        ); // TODO: FakeLogger
+        var options = new TransportOptions { SchemaName = "someschema" };
+
+        await target.CreateSchema(options, CancellationToken.None);
+
+        // Act
+        await target.CreateInfrastructure(options, CancellationToken.None);
+
+        // Assert
+        await using var dataSource = NpgsqlDataSource.Create(container.GetConnectionString());
+        await using var connection = await dataSource.OpenConnectionAsync();
+        await using var command = new NpgsqlCommand(
+            "SELECT schema_name from information_schema.schemata",
+            connection
+        );
+        var result = await command.ReadAsListAsync().ToListAsync();
+        using var _ = Assert.Multiple();
+        await Assert.That(result).Contains("someschema");
+        await Assert.That(result).DoesNotContain("bussig");
     }
 }
