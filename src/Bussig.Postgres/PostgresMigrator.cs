@@ -95,12 +95,12 @@ public class PostgresMigrator(NpgsqlDataSource npgsqlDataSource, ILogger<Postgre
             CREATE TABLE IF NOT EXISTS "{0}".queues(
                     queue_id                BIGINT          NOT NULL PRIMARY KEY DEFAULT nextval('"{0}".topology_seq')
                 ,   name                    TEXT            NOT NULL
-                ,   type                    INTEGER         NOT NULL -- 1=Main, 2=DLQ
+                ,   type                    SMALLINT        NOT NULL -- 1=Main, 2=DLQ
                 ,   max_delivery_count      INTEGER         NOT NULL DEFAULT 3
                 ,   updated_at              TIMESTAMPTZ     NOT NULL DEFAULT (NOW() AT TIME ZONE 'utc')
             );
-
-            CREATE UNIQUE INDEX IF NOT EXISTS queues_idx_name_type ON "{0}".queues (name, type);
+            CREATE UNIQUE INDEX IF NOT EXISTS queues_idx_name_type ON "{0}".queues (name, type) INCLUDE (queue_id);
+            ALTER TABLE "{0}".queues ADD CONSTRAINT unique_queue UNIQUE USING INDEX queues_idx_name_type;
 
             CREATE TABLE IF NOT EXISTS "{0}".messages (
                     message_id              UUID            NOT NULL PRIMARY KEY
@@ -113,22 +113,124 @@ public class PostgresMigrator(NpgsqlDataSource npgsqlDataSource, ILogger<Postgre
                     message_delivery_id     BIGINT          PRIMARY KEY GENERATED ALWAYS AS IDENTITY
                 ,   message_id              UUID            REFERENCES "{0}".messages(message_id)
                 ,   queue_id                BIGINT          REFERENCES "{0}".queues(queue_id)
-                ,   priority                SMALLINT        NOT NULL --low is high prio
-                ,   visible_at              TIMESTAMPTZ     NOT NULL DEFAULT (NOW() AT TIME ZONE 'utc')
+                ,   priority                SMALLINT        NOT NULL                                    --low is high prio
+                ,   visible_at              TIMESTAMPTZ     NOT NULL DEFAULT (NOW() AT TIME ZONE 'utc') -- when message is available for processing (scheduled or lock is expired)
                 ,   enqueued_at             TIMESTAMPTZ     NOT NULL DEFAULT (NOW() AT TIME ZONE 'utc') -- info
+                ,   last_delivered_at       TIMESTAMPTZ     NULL                                        -- when was message last delivered (processed)
                 ,   delivery_count          INTEGER         NOT NULL DEFAULT 0
                 ,   max_delivery_count      INTEGER         NOT NULL 
-                ,   expiration_time         TIMESTAMPTZ     NULL
+                ,   expiration_time         TIMESTAMPTZ     NULL                                        -- auto delete date
                 ,   lock_id                 UUID            NULL
-                ,   lock_until              TIMESTAMPTZ     NULL
+                -- todo: add consumer id (purely informational), either session based or something you can set in config. set it when fetching messages
             );
 
             CREATE INDEX IF NOT EXISTS message_delivery_idx_fetch ON "{0}".message_delivery (queue_id, priority ASC, visible_at, message_delivery_id);
             CREATE INDEX IF NOT EXISTS message_delivery_idx_message_id ON "{0}".message_delivery (message_id);
 
+            CREATE OR REPLACE FUNCTION "{0}".get_messages(
+                    a_queue_name          TEXT
+                ,   a_lock_id             UUID
+                ,   a_lock_duration       INTERVAL
+                ,   a_count               INTEGER DEFAULT 1
+            ) RETURNS TABLE (
+                    message_id          UUID
+                ,   message_delivery_id BIGINT
+                ,   priority            SMALLINT
+                ,   queue_id            BIGINT
+                ,   visible_at          TIMESTAMPTZ
+                ,   body                BYTEA
+                ,   headers             JSONB
+                ,   message_version     INTEGER
+                ,   lock_id             UUID
+                ,   enqueued_at         TIMESTAMPTZ
+                ,   last_delivered_at   TIMESTAMPTZ
+                ,   delivery_count      INTEGER
+                ,   max_delivery_count  INTEGER
+                ,   expiration_time     TIMESTAMPTZ
+            ) AS
+            $$
+            DECLARE
+                v_queue_id      BIGINT;
+                v_now           TIMESTAMPTZ;
+                v_visible_at    TIMESTAMPTZ;
+            BEGIN
+                SELECT q.queue_id INTO v_queue_id FROM "{0}".queues q WHERE q.name = a_queue_name AND q.type = 1;
+                
+                IF v_queue_id IS NULL THEN
+                    RAISE EXCEPTION 'Queue not found: %s', a_queue_name;
+                END IF;
+                
+                v_now := (NOW() AT TIME ZONE 'utc');
+                v_visible_at := v_now + a_lock_duration;
+                
+                RETURN QUERY
+                WITH msgs AS (
+                    SELECT md.* FROM "{0}".message_delivery md
+                    WHERE queue_id = v_queue_id
+                    AND md.visible_at <= v_now
+                    AND md.delivery_count < md.max_delivery_count
+                    ORDER BY md.priority, md.visible_at, md.message_delivery_id
+                    LIMIT a_count FOR UPDATE OF md SKIP LOCKED
+                )
+                UPDATE "{0}".message_delivery umd
+                SET delivery_count = umd.delivery_count + 1,
+                    lock_id = a_lock_id,
+                    visible_at = v_visible_at,
+                    last_delivered_at = v_now
+                FROM msgs
+                JOIN "{0}".messages m ON msgs.message_id = m.message_id
+                WHERE umd.message_delivery_id = msgs.message_delivery_id
+                RETURNING
+                    m.message_id,
+                    umd.message_delivery_id,
+                    umd.priority,
+                    umd.queue_id,
+                    umd.visible_at,
+                    m.body,
+                    m.headers,
+                    m.message_version,
+                    umd.lock_id,
+                    umd.enqueued_at,
+                    umd.last_delivered_at,
+                    umd.delivery_count,
+                    umd.max_delivery_count,
+                    umd.expiration_time;
+            END;
+            $$ LANGUAGE plpgsql;
+
+            CREATE OR REPLACE FUNCTION "{0}".create_queue(
+                    name                TEXT
+                ,   max_delivery_count  INTEGER     DEFAULT NULL
+            )
+                RETURNS BIGINT AS
+            $$
+            DECLARE
+                v_queue_id    BIGINT;
+            BEGIN
+                IF name IS NULL OR LENGTH(name) < 1 THEN
+                    RAISE EXCEPTION 'Queue names must not be null or empty';
+                END IF;
+                
+                INSERT INTO {0}.queues (name, type, max_delivery_count) VALUES (name, 1, COALESCE(max_delivery_count, 3))
+                ON CONFLICT ON CONSTRAINT unique_queue DO
+                UPDATE SET
+                            updated_at = (NOW() AT TIME ZONE 'utc'),
+                            max_delivery_count = COALESCE(max_delivery_count, EXCLUDED.max_delivery_count, 3)
+                RETURNING queues.id INTO v_queue_id;
+                
+                INSERT INTO {0}.queues (name, type, max_delivery_count) VALUES (name, 2, COALESCE(max_delivery_count, 3))
+                ON CONFLICT ON CONSTRAINT unique_queue DO
+                UPDATE SET
+                            updated_at = (NOW() AT TIME ZONE 'utc'),
+                            max_delivery_count = COALESCE(max_delivery_count, EXCLUDED.max_delivery_count, 3);
+                
+                RETURN v_queue_id;
+            END;
+            $$ LANGUAGE plpgsql;
+
             CREATE OR REPLACE FUNCTION "{0}".send_message(
                     queue_name      TEXT
-                ,   message_id      UUID        DEFAULT "{0}".genuuid()
+                ,   message_id      UUID        DEFAULT "{0}".genuuid() -- todo remove this, generate on client instead
                 ,   priority        INTEGER     DEFAULT NULL
                 ,   body            BYTEA       DEFAULT NULL
                 ,   delay           INTERVAL    DEFAULT INTERVAL '0 seconds'

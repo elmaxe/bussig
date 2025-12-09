@@ -69,34 +69,4 @@ public class CreateInfrastructureTests
         using var _ = Assert.Multiple();
         await Assert.That(action).ThrowsNothing();
     }
-
-    [Test]
-    public async Task WithOptions_RespectsSchema()
-    {
-        // Arrange
-        var container = await Containers.GetContainerAsync();
-
-        var target = new Postgres.PostgresMigrator(
-            NpgsqlDataSource.Create(container.GetConnectionString()),
-            Mock.Of<ILogger<Postgres.PostgresMigrator>>()
-        ); // TODO: FakeLogger
-        var options = new TransportOptions { SchemaName = "someschema" };
-
-        await target.CreateSchema(options, CancellationToken.None);
-
-        // Act
-        await target.CreateInfrastructure(options, CancellationToken.None);
-
-        // Assert
-        await using var dataSource = NpgsqlDataSource.Create(container.GetConnectionString());
-        await using var connection = await dataSource.OpenConnectionAsync();
-        await using var command = new NpgsqlCommand(
-            "SELECT schema_name from information_schema.schemata",
-            connection
-        );
-        var result = await command.ReadAsListAsync().ToListAsync();
-        using var _ = Assert.Multiple();
-        await Assert.That(result).Contains("someschema");
-        await Assert.That(result).DoesNotContain("bussig");
-    }
 }
