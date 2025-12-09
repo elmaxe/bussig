@@ -87,6 +87,7 @@ public class PostgresMigrator(NpgsqlDataSource npgsqlDataSource, ILogger<Postgre
             $$ LANGUAGE plpgsql;
             """;
 
+    // TODO: Move this to a .sql file instead
     private const string CreateInfrastructureSqlCommand =
         //lang=postgresql
         """
@@ -198,45 +199,48 @@ public class PostgresMigrator(NpgsqlDataSource npgsqlDataSource, ILogger<Postgre
             END;
             $$ LANGUAGE plpgsql;
 
+            -- abandon message (with delay)
+            -- complete message
+
             CREATE OR REPLACE FUNCTION "{0}".create_queue(
-                    name                TEXT
-                ,   max_delivery_count  INTEGER     DEFAULT NULL
+                    a_name                TEXT
+                ,   a_max_delivery_count  INTEGER     DEFAULT NULL
             )
                 RETURNS BIGINT AS
             $$
             DECLARE
                 v_queue_id    BIGINT;
             BEGIN
-                IF name IS NULL OR LENGTH(name) < 1 THEN
+                IF a_name IS NULL OR LENGTH(a_name) < 1 THEN
                     RAISE EXCEPTION 'Queue names must not be null or empty';
                 END IF;
                 
-                INSERT INTO {0}.queues (name, type, max_delivery_count) VALUES (name, 1, COALESCE(max_delivery_count, 3))
+                INSERT INTO "{0}".queues (name, type, max_delivery_count) VALUES (a_name, 1, COALESCE(a_max_delivery_count, 3))
                 ON CONFLICT ON CONSTRAINT unique_queue DO
                 UPDATE SET
                             updated_at = (NOW() AT TIME ZONE 'utc'),
-                            max_delivery_count = COALESCE(max_delivery_count, EXCLUDED.max_delivery_count, 3)
-                RETURNING queues.id INTO v_queue_id;
+                            max_delivery_count = COALESCE(a_max_delivery_count, EXCLUDED.max_delivery_count, 3)
+                RETURNING queues.queue_id INTO v_queue_id;
                 
-                INSERT INTO {0}.queues (name, type, max_delivery_count) VALUES (name, 2, COALESCE(max_delivery_count, 3))
+                INSERT INTO "{0}".queues (name, type, max_delivery_count) VALUES (a_name, 2, COALESCE(a_max_delivery_count, 3))
                 ON CONFLICT ON CONSTRAINT unique_queue DO
                 UPDATE SET
                             updated_at = (NOW() AT TIME ZONE 'utc'),
-                            max_delivery_count = COALESCE(max_delivery_count, EXCLUDED.max_delivery_count, 3);
+                            max_delivery_count = COALESCE(a_max_delivery_count, EXCLUDED.max_delivery_count, 3);
                 
                 RETURN v_queue_id;
             END;
             $$ LANGUAGE plpgsql;
 
             CREATE OR REPLACE FUNCTION "{0}".send_message(
-                    queue_name      TEXT
-                ,   message_id      UUID        DEFAULT "{0}".genuuid() -- todo remove this, generate on client instead
-                ,   priority        INTEGER     DEFAULT NULL
-                ,   body            BYTEA       DEFAULT NULL
-                ,   delay           INTERVAL    DEFAULT INTERVAL '0 seconds'
-                ,   headers         JSONB       DEFAULT NULL
-                ,   message_version INTEGER     DEFAULT 0
-                ,   expiration_time TIMESTAMPTZ DEFAULT NULL
+                    a_queue_name        TEXT
+                ,   a_message_id        UUID        DEFAULT "{0}".genuuid() -- todo remove this, generate on client instead
+                ,   a_priority          INTEGER     DEFAULT NULL
+                ,   a_body              BYTEA       DEFAULT NULL
+                ,   a_delay             INTERVAL    DEFAULT INTERVAL '0 seconds'
+                ,   a_headers           JSONB       DEFAULT NULL
+                ,   a_message_version   INTEGER     DEFAULT 0
+                ,   a_expiration_time   TIMESTAMPTZ DEFAULT NULL
             )
                 RETURNS BIGINT AS
             $$
@@ -246,7 +250,7 @@ public class PostgresMigrator(NpgsqlDataSource npgsqlDataSource, ILogger<Postgre
                 v_visible_at            TIMESTAMPTZ;
                 v_enqueued_at           TIMESTAMPTZ;
             BEGIN
-                SELECT q.queue_id, q.max_delivery_count INTO v_queue_id, v_max_delivery_count FROM "{0}".queues q WHERE q.name = queue_name AND q.type = 1;
+                SELECT q.queue_id, q.max_delivery_count INTO v_queue_id, v_max_delivery_count FROM "{0}".queues q WHERE q.name = a_queue_name AND q.type = 1;
                 
                 IF v_queue_id IS NULL THEN
                     RAISE EXCEPTION 'Queue not found';
@@ -254,15 +258,15 @@ public class PostgresMigrator(NpgsqlDataSource npgsqlDataSource, ILogger<Postgre
                 
                 v_visible_at := (NOW() AT TIME ZONE 'utc');
                 v_enqueued_at := v_visible_at;
-                IF delay > INTERVAL '0 seconds' THEN
-                    v_visible_at = v_visible_at + delay;
+                IF a_delay > INTERVAL '0 seconds' THEN
+                    v_visible_at = v_visible_at + a_delay;
                 END IF;
                 
                 INSERT INTO "{0}".messages(message_id, body, headers, message_version)
-                VALUES (send_message.message_id, send_message.body, send_message.headers, send_message.message_version);
+                VALUES (a_message_id, a_body, a_headers, a_message_version);
                 
                 INSERT INTO "{0}".message_delivery(message_id, queue_id, priority, visible_at, enqueued_at, delivery_count, max_delivery_count, expiration_time)
-                VALUES (send_message.message_id, v_queue_id, send_message.priority, v_visible_at, v_enqueued_at, 0, v_max_delivery_count, send_message.expiration_time);
+                VALUES (a_message_id, v_queue_id, a_priority, v_visible_at, v_enqueued_at, 0, v_max_delivery_count, a_expiration_time);
 
                 RETURN 1;
             END;
