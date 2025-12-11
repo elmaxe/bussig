@@ -228,6 +228,37 @@ public class PostgresMigrator(NpgsqlDataSource npgsqlDataSource, ILogger<Postgre
             END;
             $$ LANGUAGE plpgsql;
 
+            CREATE OR REPLACE FUNCTION "{0}".move_message(
+                    a_message_delivery_id       BIGINT
+                ,   a_lock_id                   UUID
+                ,   a_queue_type                SMALLINT
+                ,   a_queue_name                TEXT
+                ,   a_headers                   JSON
+                ,   a_delay                     INTERVAL DEFAULT '0 seconds'
+            ) RETURNS BIGINT AS
+            $$
+            DECLARE
+                vl_dest_queue_id    BIGINT;
+                v_visible_at        TIMESTAMPTZ;
+            BEGIN
+                SELECT q.queue_id INTO vl_dest_queue_id FROM "{0}".queues q WHERE q.name = a_queue_name AND q.type = a_queue_type;
+                IF vl_dest_queue_id IS NULL THEN
+                    RAISE EXCEPTION 'Queue with name %s of type %s not found', a_queue_name, a_queue_type;
+                END IF;
+                
+                v_visible_at := (NOW() AT TIME ZONE  'utc');
+                IF a_delay > INTERVAL '0 seconds' THEN
+                    v_visible_at = v_visible_at + a_delay;
+                END IF;
+
+                RETURN QUERY
+                UPDATE "{0}".message_delivery md
+                SET queue_id = vl_dest_queue_id, visible_at = v_visible_at, lock_id = NULL, message_delivery_headers = a_headers
+                WHERE md.message_delivery_id = a_message_delivery_id AND md.lock_id = a_lock_id
+                RETURNING md.message_delivery_id;
+            END;
+            $$ LANGUAGE plpgsql;
+
             CREATE OR REPLACE FUNCTION "{0}".deadletter_message(
                     a_message_delivery_id       BIGINT
                 ,   a_lock_id                   UUID
@@ -235,25 +266,12 @@ public class PostgresMigrator(NpgsqlDataSource npgsqlDataSource, ILogger<Postgre
                 ,   a_headers                   JSON
             ) RETURNS BIGINT AS
             $$
-            DECLARE
-                v_dl_queue_id       BIGINT;
-                v_visible_at        TIMESTAMPTZ;
             BEGIN
-                SELECT q.queue_id INTO v_dl_queue_id FROM "{0}".queues q WHERE q.name = a_queue_name AND q.type = 2;
-                IF v_dl_queue_id IS NULL THEN
-                    RAISE EXCEPTION 'DL Queue not found: %s', a_queue_name;
-                END IF;
-                
-                v_visible_at := (NOW() AT TIME ZONE  'utc');
-                
-                RETURN QUERY
-                UPDATE "{0}".message_delivery md
-                SET queue_id = v_dl_queue_id, visible_at = v_visible_at, lock_id = NULL, message_delivery_headers = a_headers
-                WHERE md.message_delivery_id = a_message_delivery_id AND md.lock_id = a_lock_id
-                RETURNING md.message_delivery_id;
-
+                RETURN "{0}".move_message(a_message_delivery_id, a_lock_id, 2, a_queue_name, a_headers);
             END;
             $$ LANGUAGE plpgsql;
+
+            -- todo: requeue deadlettered messages
 
             CREATE OR REPLACE FUNCTION "{0}".renew_message_lock(
                     a_message_delivery_id   BIGINT
