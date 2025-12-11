@@ -83,10 +83,10 @@ public class PostgresMigrator(NpgsqlDataSource npgsqlDataSource, ILogger<Postgre
                 ,   body                    BYTEA           NULL
                 ,   headers                 JSONB           NULL
                 ,   message_version         INTEGER         NOT NULL DEFAULT 0
-                ,   schedule_token_id           UUID        NULL                    -- used when scheduling. Needs to be used when cancelling a scheduled message
+                ,   scheduling_token_id     UUID            NULL                    -- used when scheduling. Needs to be used when cancelling a scheduled message
             );
 
-            CREATE INDEX IF NOT EXISTS messages_idx_schedule_token ON "{0}".messages (schedule_token_id) WHERE messages.schedule_token_id IS NOT NULL;         
+            CREATE INDEX IF NOT EXISTS messages_idx_schedule_token ON "{0}".messages (scheduling_token_id) WHERE messages.scheduling_token_id IS NOT NULL;         
 
             CREATE TABLE IF NOT EXISTS "{0}".message_delivery (
                     message_delivery_id         BIGINT          PRIMARY KEY GENERATED ALWAYS AS IDENTITY
@@ -122,7 +122,7 @@ public class PostgresMigrator(NpgsqlDataSource npgsqlDataSource, ILogger<Postgre
                 ,   headers                     JSONB
                 ,   message_delivery_headers    JSONB
                 ,   message_version             INTEGER
-                ,   schedule_token_id           UUID
+                ,   scheduling_token_id         UUID
                 ,   lock_id                     UUID
                 ,   enqueued_at                 TIMESTAMPTZ
                 ,   last_delivered_at           TIMESTAMPTZ
@@ -172,7 +172,7 @@ public class PostgresMigrator(NpgsqlDataSource npgsqlDataSource, ILogger<Postgre
                     m.headers,
                     umd.message_delivery_headers,
                     m.message_version,
-                    m.schedule_token_id,
+                    m.scheduling_token_id,
                     umd.lock_id,
                     umd.enqueued_at,
                     umd.last_delivered_at,
@@ -280,7 +280,7 @@ public class PostgresMigrator(NpgsqlDataSource npgsqlDataSource, ILogger<Postgre
             $$ LANGUAGE plpgsql;
 
             CREATE OR REPLACE FUNCTION "{0}".delete_scheduled_message(
-                    a_schedule_token_id     UUID
+                    a_scheduling_token_id     UUID
             ) RETURNS BIGINT AS
             $$
             DECLARE
@@ -289,7 +289,7 @@ public class PostgresMigrator(NpgsqlDataSource npgsqlDataSource, ILogger<Postgre
                 DELETE FROM "{0}".messages m
                     USING "{0}".messages mm
                     LEFT JOIN "{0}".message_delivery md ON md.message_id = mm.message_id
-                WHERE m.schedule_token_id = a_schedule_token_id
+                WHERE m.scheduling_token_id = a_scheduling_token_id
                 AND mm.message_id = m.message_id
                 AND md.delivery_count = 0
                 AND md.lock_id IS NULL
@@ -328,14 +328,15 @@ public class PostgresMigrator(NpgsqlDataSource npgsqlDataSource, ILogger<Postgre
             $$ LANGUAGE plpgsql;
 
             CREATE OR REPLACE FUNCTION "{0}".send_message(
-                    a_queue_name        TEXT
-                ,   a_message_id        UUID
-                ,   a_priority          INTEGER     DEFAULT NULL
-                ,   a_body              BYTEA       DEFAULT NULL
-                ,   a_delay             INTERVAL    DEFAULT INTERVAL '0 seconds'
-                ,   a_headers           JSONB       DEFAULT NULL
-                ,   a_message_version   INTEGER     DEFAULT 0
-                ,   a_expiration_time   TIMESTAMPTZ DEFAULT NULL
+                    a_queue_name            TEXT
+                ,   a_message_id            UUID
+                ,   a_priority              INTEGER     DEFAULT NULL
+                ,   a_body                  BYTEA       DEFAULT NULL
+                ,   a_delay                 INTERVAL    DEFAULT INTERVAL '0 seconds'
+                ,   a_headers               JSONB       DEFAULT NULL
+                ,   a_message_version       INTEGER     DEFAULT 0
+                ,   a_expiration_time       TIMESTAMPTZ DEFAULT NULL
+                ,   a_scheduling_token_id   UUID        DEFAULT NULL
             )
                 RETURNS BIGINT AS
             $$
@@ -357,8 +358,8 @@ public class PostgresMigrator(NpgsqlDataSource npgsqlDataSource, ILogger<Postgre
                     v_visible_at = v_visible_at + a_delay;
                 END IF;
                 
-                INSERT INTO "{0}".messages(message_id, body, headers, message_version)
-                VALUES (a_message_id, a_body, a_headers, a_message_version);
+                INSERT INTO "{0}".messages(message_id, body, headers, message_version, scheduling_token_id)
+                VALUES (a_message_id, a_body, a_headers, a_message_version, a_scheduling_token_id);
                 
                 INSERT INTO "{0}".message_delivery(message_id, queue_id, priority, visible_at, enqueued_at, delivery_count, max_delivery_count, expiration_time)
                 VALUES (a_message_id, v_queue_id, a_priority, v_visible_at, v_enqueued_at, 0, v_max_delivery_count, a_expiration_time);
