@@ -45,16 +45,6 @@ public class PostgresMigrator(NpgsqlDataSource npgsqlDataSource, ILogger<Postgre
         await using var connection = await npgsqlDataSource.OpenConnectionAsync(cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
 
-        await using (
-            var command = new NpgsqlCommand(
-                CreateUuidFunctionSqlCommand(options),
-                connection,
-                transaction
-            )
-        )
-        {
-            await command.ExecuteScalarAsync(cancellationToken);
-        }
         var formattedCmdStr = string.Format(CreateInfrastructureSqlCommand, options.SchemaName);
         await using (var command = new NpgsqlCommand(formattedCmdStr, connection, transaction))
         {
@@ -70,21 +60,6 @@ public class PostgresMigrator(NpgsqlDataSource npgsqlDataSource, ILogger<Postgre
         //lang=postgresql
         """
             CREATE SCHEMA IF NOT EXISTS "{0}";
-            """;
-
-    private static string CreateUuidFunctionSqlCommand(TransportOptions options) =>
-        //lang=postgresql
-        $"""
-            CREATE OR REPLACE FUNCTION "{options.SchemaName}".genuuid() RETURNS UUID AS
-            $$
-            BEGIN
-                {(
-                options.PostgresVersion >= PostgresVersion.Pg18
-                    ? "RETURN pg_catalog.uuidv7()"
-                    : "RETURN pg_catalog.gen_random_uuid()"
-            )};
-            END;
-            $$ LANGUAGE plpgsql;
             """;
 
     // TODO: Move this to a .sql file instead
@@ -354,7 +329,7 @@ public class PostgresMigrator(NpgsqlDataSource npgsqlDataSource, ILogger<Postgre
 
             CREATE OR REPLACE FUNCTION "{0}".send_message(
                     a_queue_name        TEXT
-                ,   a_message_id        UUID        DEFAULT "{0}".genuuid() -- todo remove this, generate on client instead
+                ,   a_message_id        UUID
                 ,   a_priority          INTEGER     DEFAULT NULL
                 ,   a_body              BYTEA       DEFAULT NULL
                 ,   a_delay             INTERVAL    DEFAULT INTERVAL '0 seconds'
