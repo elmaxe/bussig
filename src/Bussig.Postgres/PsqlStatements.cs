@@ -3,9 +3,19 @@ namespace Bussig.Postgres;
 public class PsqlStatements
 {
     public const string SendMessage =
-        """SELECT "{0}".send_message($1, $2, $3, $4, $5, $6, $8, $9);""";
+        """SELECT * FROM "{0}".send_message($1, $2, $3, $4, $5, $6, $8, $9);""";
 
-    public const string CreateQueue = """SELECT "{0}".create_queue($1, $2);""";
+    public const string CreateQueue = """SELECT * FROM "{0}".create_queue($1, $2);""";
 
-    public const string GetMessages = """SELECT "{0}".get_messages($1, $2, $3, $4);""";
+    public const string GetMessages = """SELECT * FROM "{0}".get_messages($1, $2, $3, $4);""";
+    public const string CompleteMessage = """SELECT * FROM "{0}".complete_message($1, $2);""";
+    public const string AbandonMessage = """SELECT * FROM "{0}".abandon_message($1, $2, $3, $4);""";
+    public const string DeadLetterMessage =
+        """SELECT * FROM "{0}".deadletter_message($1, $2, $3, $4);""";
+
+    public const string RenewMessageLock =
+        """SELECT * FROM "{0}".renew_message_lock($1, $2, $3);""";
+
+    public const string DeleteScheduledMessage =
+        """SELECT * FROM "{0}".delete_scheduled_message($1);""";
 }

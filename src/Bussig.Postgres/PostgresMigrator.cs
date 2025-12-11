@@ -108,20 +108,24 @@ public class PostgresMigrator(NpgsqlDataSource npgsqlDataSource, ILogger<Postgre
                 ,   body                    BYTEA           NULL
                 ,   headers                 JSONB           NULL
                 ,   message_version         INTEGER         NOT NULL DEFAULT 0
+                ,   schedule_token_id           UUID        NULL                    -- used when scheduling. Needs to be used when cancelling a scheduled message
             );
 
+            CREATE INDEX IF NOT EXISTS messages_idx_schedule_token ON "{0}".messages (schedule_token_id) WHERE messages.schedule_token_id IS NOT NULL;         
+
             CREATE TABLE IF NOT EXISTS "{0}".message_delivery (
-                    message_delivery_id     BIGINT          PRIMARY KEY GENERATED ALWAYS AS IDENTITY
-                ,   message_id              UUID            REFERENCES "{0}".messages(message_id)
-                ,   queue_id                BIGINT          REFERENCES "{0}".queues(queue_id)
-                ,   priority                SMALLINT        NOT NULL                                    --low is high prio
-                ,   visible_at              TIMESTAMPTZ     NOT NULL DEFAULT (NOW() AT TIME ZONE 'utc') -- when message is available for processing (scheduled or lock is expired)
-                ,   enqueued_at             TIMESTAMPTZ     NOT NULL DEFAULT (NOW() AT TIME ZONE 'utc') -- info
-                ,   last_delivered_at       TIMESTAMPTZ     NULL                                        -- when was message last delivered (processed)
-                ,   delivery_count          INTEGER         NOT NULL DEFAULT 0
-                ,   max_delivery_count      INTEGER         NOT NULL 
-                ,   expiration_time         TIMESTAMPTZ     NULL                                        -- auto delete date
-                ,   lock_id                 UUID            NULL
+                    message_delivery_id         BIGINT          PRIMARY KEY GENERATED ALWAYS AS IDENTITY
+                ,   message_id                  UUID            NOT NULL REFERENCES "{0}".messages(message_id) ON DELETE CASCADE
+                ,   queue_id                    BIGINT          NOT NULL REFERENCES "{0}".queues(queue_id)
+                ,   lock_id                     UUID            NULL
+                ,   priority                    SMALLINT        NOT NULL                                    --low is high prio
+                ,   visible_at                  TIMESTAMPTZ     NOT NULL DEFAULT (NOW() AT TIME ZONE 'utc') -- when message is available for processing (scheduled or lock is expired)
+                ,   enqueued_at                 TIMESTAMPTZ     NOT NULL DEFAULT (NOW() AT TIME ZONE 'utc') -- info
+                ,   last_delivered_at           TIMESTAMPTZ     NULL                                        -- when was message last delivered (processed)
+                ,   delivery_count              INTEGER         NOT NULL DEFAULT 0
+                ,   max_delivery_count          INTEGER         NOT NULL 
+                ,   expiration_time             TIMESTAMPTZ     NULL                                        -- auto delete date
+                ,   message_delivery_headers    JSONB           NULL
                 -- todo: add consumer id (purely informational), either session based or something you can set in config. set it when fetching messages
             );
 
@@ -134,20 +138,22 @@ public class PostgresMigrator(NpgsqlDataSource npgsqlDataSource, ILogger<Postgre
                 ,   a_lock_duration       INTERVAL
                 ,   a_count               INTEGER DEFAULT 1
             ) RETURNS TABLE (
-                    message_id          UUID
-                ,   message_delivery_id BIGINT
-                ,   priority            SMALLINT
-                ,   queue_id            BIGINT
-                ,   visible_at          TIMESTAMPTZ
-                ,   body                BYTEA
-                ,   headers             JSONB
-                ,   message_version     INTEGER
-                ,   lock_id             UUID
-                ,   enqueued_at         TIMESTAMPTZ
-                ,   last_delivered_at   TIMESTAMPTZ
-                ,   delivery_count      INTEGER
-                ,   max_delivery_count  INTEGER
-                ,   expiration_time     TIMESTAMPTZ
+                    message_id                  UUID
+                ,   message_delivery_id         BIGINT
+                ,   priority                    SMALLINT
+                ,   queue_id                    BIGINT
+                ,   visible_at                  TIMESTAMPTZ
+                ,   body                        BYTEA
+                ,   headers                     JSONB
+                ,   message_delivery_headers    JSONB
+                ,   message_version             INTEGER
+                ,   schedule_token_id           UUID
+                ,   lock_id                     UUID
+                ,   enqueued_at                 TIMESTAMPTZ
+                ,   last_delivered_at           TIMESTAMPTZ
+                ,   delivery_count              INTEGER
+                ,   max_delivery_count          INTEGER
+                ,   expiration_time             TIMESTAMPTZ
             ) AS
             $$
             DECLARE
@@ -189,7 +195,9 @@ public class PostgresMigrator(NpgsqlDataSource npgsqlDataSource, ILogger<Postgre
                     umd.visible_at,
                     m.body,
                     m.headers,
+                    umd.message_delivery_headers,
                     m.message_version,
+                    m.schedule_token_id,
                     umd.lock_id,
                     umd.enqueued_at,
                     umd.last_delivered_at,
@@ -199,8 +207,120 @@ public class PostgresMigrator(NpgsqlDataSource npgsqlDataSource, ILogger<Postgre
             END;
             $$ LANGUAGE plpgsql;
 
-            -- abandon message (with delay)
-            -- complete message
+            CREATE OR REPLACE FUNCTION "{0}".complete_message(
+                    a_message_delivery_id   BIGINT
+                ,   a_lock_id               UUID
+            ) RETURNS BIGINT AS
+            $$
+            DECLARE
+                v_message_delivery_id   BIGINT;
+                v_message_id            UUID;
+                v_queue_id              BIGINT;
+            BEGIN
+                
+                DELETE FROM "{0}".message_delivery md WHERE md.message_delivery_id = a_message_delivery_id AND md.lock_id = a_lock_id
+                RETURNING md.message_delivery_id, md.message_id, md.queue_id INTO v_message_delivery_id, v_message_id, v_queue_id;
+                
+                IF v_message_id IS NOT NULL THEN
+                    DELETE FROM "{0}".messages m WHERE m.message_id = v_message_id
+                    AND NOT EXISTS(SELECT FROM "{0}".message_delivery md WHERE md.message_id = v_message_id);
+                END IF;
+                
+                RETURN v_message_delivery_id;
+            END;
+            $$ LANGUAGE plpgsql;
+
+            CREATE OR REPLACE FUNCTION "{0}".abandon_message(
+                    a_message_delivery_id   BIGINT
+                ,   a_lock_id               UUID
+                ,   a_headers               JSONB
+                ,   a_delay                 INTERVAL DEFAULT INTERVAL '0 seconds'
+            ) RETURNS BIGINT AS
+            $$
+            DECLARE
+                v_visible_at    TIMESTAMPTZ;
+            BEGIN
+                v_visible_at := (NOW() AT TIME ZONE 'utc');
+                IF a_delay > INTERVAL '0 seconds' THEN
+                    v_visible_at = v_visible_at + a_delay;
+                END IF;
+                
+                RETURN QUERY
+                UPDATE "{0}".message_delivery md
+                SET lock_id = NULL, visible_at = v_visible_at, message_delivery_headers = a_headers
+                WHERE md.message_delivery_id = a_message_delivery_id AND md.lock_id = a_lock_id 
+                RETURNING md.message_delivery_id;
+            END;
+            $$ LANGUAGE plpgsql;
+
+            CREATE OR REPLACE FUNCTION "{0}".deadletter_message(
+                    a_message_delivery_id       BIGINT
+                ,   a_lock_id                   UUID
+                ,   a_queue_name                TEXT
+                ,   a_headers                   JSON
+            ) RETURNS BIGINT AS
+            $$
+            DECLARE
+                v_dl_queue_id       BIGINT;
+                v_visible_at        TIMESTAMPTZ;
+            BEGIN
+                SELECT q.queue_id INTO v_dl_queue_id FROM "{0}".queues q WHERE q.name = a_queue_name AND q.type = 2;
+                IF v_dl_queue_id IS NULL THEN
+                    RAISE EXCEPTION 'DL Queue not found: %s', a_queue_name;
+                END IF;
+                
+                v_visible_at := (NOW() AT TIME ZONE  'utc');
+                
+                RETURN QUERY
+                UPDATE "{0}".message_delivery md
+                SET queue_id = v_dl_queue_id, visible_at = v_visible_at, lock_id = NULL, message_delivery_headers = a_headers
+                WHERE md.message_delivery_id = a_message_delivery_id AND md.lock_id = a_lock_id
+                RETURNING md.message_delivery_id;
+
+            END;
+            $$ LANGUAGE plpgsql;
+
+            CREATE OR REPLACE FUNCTION "{0}".renew_message_lock(
+                    a_message_delivery_id   BIGINT
+                ,   a_lock_id               UUID
+                ,   a_duration              INTERVAL
+            ) RETURNS BIGINT AS
+            $$
+            DECLARE 
+                v_visible_at    TIMESTAMPTZ;
+            BEGIN
+                IF a_duration IS NULL OR a_duration < INTERVAL '1 seconds' THEN
+                    RAISE EXCEPTION 'Lock duration is invalid';
+                END IF;
+                
+                v_visible_at := (NOW() AT TIME ZONE 'utc') + a_duration;
+                
+                RETURN QUERY
+                UPDATE "{0}".message_delivery md
+                SET visible_at = v_visible_at
+                WHERE md.message_delivery_id = a_message_delivery_id AND md.lock_id = a_lock_id
+                RETURNING md.message_delivery_id;
+                
+            END;
+            $$ LANGUAGE plpgsql;
+
+            CREATE OR REPLACE FUNCTION "{0}".delete_scheduled_message(
+                    a_schedule_token_id     UUID
+            ) RETURNS BIGINT AS
+            $$
+            DECLARE
+            BEGIN
+                RETURN QUERY
+                DELETE FROM "{0}".messages m
+                    USING "{0}".messages mm
+                    LEFT JOIN "{0}".message_delivery md ON md.message_id = mm.message_id
+                WHERE m.schedule_token_id = a_schedule_token_id
+                AND mm.message_id = m.message_id
+                AND md.delivery_count = 0
+                AND md.lock_id IS NULL
+                RETURNING m.message_id;
+            END;
+            $$ LANGUAGE plpgsql;
 
             CREATE OR REPLACE FUNCTION "{0}".create_queue(
                     a_name                TEXT
