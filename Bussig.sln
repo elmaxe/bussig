@@ -11,6 +11,7 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution 
 		LICENSE = LICENSE
 		Directory.Build.props = Directory.Build.props
 		README.md = README.md
+		.config\dotnet-tools.json = .config\dotnet-tools.json
 	EndProjectSection
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Bussig.Postgres.Tests.Unit", "src\Bussig.Postgres.Tests.Unit\Bussig.Postgres.Tests.Unit.csproj", "{9E51524C-9E61-4EDF-AF25-676A48E8F3B9}"
