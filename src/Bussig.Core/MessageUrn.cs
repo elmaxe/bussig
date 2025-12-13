@@ -6,17 +6,17 @@ namespace Bussig.Core;
 public readonly record struct MessageUrn
 {
     private const string Prefix = "urn:message:";
-    private readonly string _value;
+    private readonly string _valueWithoutPrefix;
 
     public MessageUrn(string value)
     {
         if (value.StartsWith(Prefix))
         {
-            _value = value.Replace(Prefix, string.Empty);
+            _valueWithoutPrefix = value.Replace(Prefix, string.Empty);
             return;
         }
 
-        _value = value;
+        _valueWithoutPrefix = value;
     }
 
     public static MessageUrn ForType<T>() => ForType(typeof(T));
@@ -94,7 +94,7 @@ public readonly record struct MessageUrn
         return sb.ToString();
     }
 
-    public override string ToString() => $"{Prefix}{_value}";
+    public override string ToString() => $"{Prefix}{_valueWithoutPrefix}";
 
     public static implicit operator string(MessageUrn messageUrn) => messageUrn.ToString();
 }
