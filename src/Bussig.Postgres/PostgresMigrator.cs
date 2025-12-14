@@ -271,8 +271,6 @@ public class PostgresMigrator(NpgsqlDataSource npgsqlDataSource, ILogger<Postgre
             END;
             $$ LANGUAGE plpgsql;
 
-            -- todo: requeue deadlettered messages
-
             CREATE OR REPLACE FUNCTION "{0}".renew_message_lock(
                     a_message_delivery_id   BIGINT
                 ,   a_lock_id               UUID
@@ -383,6 +381,112 @@ public class PostgresMigrator(NpgsqlDataSource npgsqlDataSource, ILogger<Postgre
                 VALUES (a_message_id, v_queue_id, a_priority, v_visible_at, v_enqueued_at, 0, v_max_delivery_count, a_expiration_time);
 
                 RETURN 1;
+            END;
+            $$ LANGUAGE plpgsql;
+
+            -- Management
+            CREATE OR REPLACE FUNCTION "{0}".requeue_deadletters(
+                    a_queue_name        TEXT
+                ,   a_count             BIGINT    DEFAULT NULL
+                ,   a_messages          BIGINT[]  DEFAULT NULL
+            ) RETURNS BIGINT[] AS
+            $$
+            DECLARE
+                v_queue_id  BIGINT;
+                v_now       TIMESTAMPTZ;
+            BEGIN
+                SELECT q.queue_id INTO v_queue_id FROM "{0}".queues q WHERE q.name = a_queue_name AND q.type = 2;
+                IF v_queue_id IS NULL THEN
+                    RAISE EXCEPTION 'Queue does not exist: %s', a_queue_name;
+                END IF;
+                
+                v_now := (NOW() AT TIME ZONE 'utc');
+                
+                IF a_count IS NOT NULL AND a_count > 0 THEN
+                    RETURN QUERY
+                    WITH message_deliveries AS (
+                        SELECT * FROM "{0}".message_delivery md
+                        WHERE md.queue_id = v_queue_id
+                        ORDER BY md.visible_at, md.message_delivery_id
+                        LIMIT a_count
+                        FOR UPDATE OF md SKIP LOCKED
+                    )
+                    UPDATE "{0}".message_delivery md
+                    SET delivery_count = 0, message_delivery_headers = NULL, visible_at = v_now, enqueued_at = v_now
+                    FROM message_deliveries mdd
+                    WHERE md.message_delivery_id = mdd.message_delivery_id
+                    RETURNING md.message_delivery_id;
+                    
+                ELSIF a_messages IS NOT NULL AND ARRAY_LENGTH(a_messages, 1) > 0 THEN
+                    RETURN QUERY
+                    UPDATE "{0}".message_delivery md
+                    SET delivery_count = 0, message_delivery_headers = NULL, visible_at = v_now, enqueued_at = v_now
+                    WHERE md.queue_id = v_queue_id AND md.message_delivery_id = ANY(a_messages)
+                    RETURNING md.message_delivery_id;
+                ELSE
+                    RETURN QUERY
+                    UPDATE "{0}".message_delivery md
+                    SET delivery_count = 0, message_delivery_headers = NULL, visible_at = v_now, enqueued_at = v_now
+                    WHERE md.queue_id = v_queue_id
+                    RETURNING md.message_delivery_id;
+                END IF;
+            END;
+            $$ LANGUAGE plpgsql;
+
+            CREATE OR REPLACE FUNCTION "{0}".peek_deadletters(
+                    a_queue_name        TEXT
+                ,   a_count             BIGINT  DEFAULT NULL
+            ) RETURNS TABLE (
+                    queue_id                    BIGINT
+                ,   queue_name                  TEXT
+                ,   message_delivery_id         BIGINT
+                ,   priority                    SMALLINT
+                ,   enqueued_at                 TIMESTAMPTZ
+                ,   last_delivered_at           TIMESTAMPTZ
+                ,   delivery_count              INTEGER
+                ,   max_delivery_count          INTEGER
+                ,   expiration_time             TIMESTAMPTZ
+                ,   message_delivery_headers    JSONB
+                ,   visible_at                  TIMESTAMPTZ
+                ,   message_id                  UUID
+                ,   body                        BYTEA
+                ,   headers                     JSONB
+                ,   message_version             INTEGER
+                ,   scheduling_token_id         UUID
+            ) AS
+            $$
+            DECLARE
+                v_queue_id      BIGINT;
+                v_queue_name    TEXT;
+            BEGIN
+                SELECT q.queue_id, q.name INTO v_queue_id, v_queue_name FROM "{0}".queues q WHERE q.name = a_queue_name AND q.type = 2;
+                IF v_queue_id IS NULL THEN
+                    RAISE EXCEPTION 'Queue not found: %s', a_queue_name;
+                END IF;
+                
+                RETURN QUERY
+                SELECT
+                        v_queue_id
+                    ,   v_queue_name
+                    ,   md.message_delivery_id
+                    ,   md.priority
+                    ,   md.enqueued_at
+                    ,   md.last_delivered_at
+                    ,   md.delivery_count
+                    ,   md.max_delivery_count
+                    ,   md.expiration_time
+                    ,   md.message_delivery_headers
+                    ,   md.visible_at
+                    ,   m.message_id
+                    ,   m.body
+                    ,   m.headers
+                    ,   m.message_version
+                    ,   m.scheduling_token_id
+                FROM "{0}".message_delivery md
+                JOIN "{0}".messages m ON m.message_id = md.message_id
+                WHERE md.queue_id = v_queue_id
+                ORDER BY md.visible_at, md.message_delivery_id
+                LIMIT COALESCE(a_count, 10);
             END;
             $$ LANGUAGE plpgsql;
             """;
