@@ -1,11 +1,11 @@
 namespace Bussig.Core;
 
 [AttributeUsage(AttributeTargets.Class | AttributeTargets.Interface)]
-public class MessageUrnAttribute : Attribute
+public class MessageMappingAttribute : Attribute
 {
     public MessageUrn Urn { get; private set; }
 
-    public MessageUrnAttribute(string urn)
+    public MessageMappingAttribute(string urn)
     {
         Urn = new MessageUrn(urn);
     }

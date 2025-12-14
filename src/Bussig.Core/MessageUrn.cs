@@ -39,7 +39,7 @@ public readonly record struct MessageUrn
 
     private static MessageUrn? GetMessageUrnFromAttribute(Type type)
     {
-        var attribute = type.GetCustomAttribute<MessageUrnAttribute>();
+        var attribute = type.GetCustomAttribute<MessageMappingAttribute>();
         return attribute?.Urn;
     }
 

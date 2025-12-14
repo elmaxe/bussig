@@ -128,13 +128,13 @@ namespace Bussig.Postgres.Tests.Unit
 
     public interface ITopLevelInterface;
 
-    [MessageUrn("custom:name")]
+    [MessageMapping("custom:name")]
     public class TopLevelClassWithAttribute;
 
-    [MessageUrn("top:level:record")]
+    [MessageMapping("top:level:record")]
     public record TopLevelRecordWithAttribute;
 
-    [MessageUrn("icustom:name")]
+    [MessageMapping("icustom:name")]
     public interface ITopLevelInterfaceWithAttribute;
 
     public class TopLevelClassWithArguments<TValue>
@@ -144,14 +144,14 @@ namespace Bussig.Postgres.Tests.Unit
         where T1 : class
         where T2 : class;
 
-    [MessageUrn("urn:message:someurn")]
+    [MessageMapping("urn:message:someurn")]
     public class ClassWithAttributeWithPrefix;
 
     public class Nester
     {
         public class NestedClass;
 
-        [MessageUrn("nested:withattribute")]
+        [MessageMapping("nested:withattribute")]
         public class NestedClassWithAttribute;
 
         public class NestedClassWithGenericArguments<T1, T2, T3>;
@@ -166,13 +166,13 @@ namespace AnotherNamespace
 
     public interface ITopLevelInterface;
 
-    [MessageUrn("ans:custom:name")]
+    [MessageMapping("ans:custom:name")]
     public class TopLevelClassWithAttribute;
 
-    [MessageUrn("ans:top:level:record")]
+    [MessageMapping("ans:top:level:record")]
     public record TopLevelRecordWithAttribute;
 
-    [MessageUrn("ans:custom:iname")]
+    [MessageMapping("ans:custom:iname")]
     public interface ITopLevelInterfaceWithAttribute;
 
     public class TopLevelClassWithArguments<TValue>
@@ -186,7 +186,7 @@ namespace AnotherNamespace
     {
         public class NestedClass;
 
-        [MessageUrn("ans:nested:with:attribute")]
+        [MessageMapping("ans:nested:with:attribute")]
         public class NestedClassWithAttribute;
     }
 }
