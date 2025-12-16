@@ -1,31 +1,6 @@
 # Bussig
 Postgres Message Bus for .NET
 
-```postgresql
-bussig.metadata (
-    queue_id    UUID PRIMARY KEY,
-    name        TEXT NOT NULL UNIQUE,
-    dead_letter_queue_id UUID NOT NULL REFERENCES queues(queue_id) --possibly
-    created_at,
-    modified_at
-    -- possible per-queue settings
-    -- max_deliver_attempts, message_ttl,lock_timeout, backoff
-)
-bussig.queue_{name} (
-    id              bigserial primary key,
-    payload         bytea not null,
-    headers         jsonb not null default '{}'::jsonb,
-    enqueued_at     timestamptz not null default now(),
-    visible_at      timestamptz not null default now(),
-    delivery_count  int not null default 0,
-    
-    lock_token      uuid null,
-    lock_until      timestamptz null default null,
-    correlation_id  uuid null,
-    message_version int not null default 0
-)
-```
-
 - Queues, dead letter queues
 - Manual or automatic queue name/topic creation
 - Ability to delay re-processing of message when abandoning. Backoff setting.
@@ -51,6 +26,9 @@ subscription_events (
 );
 ```
 - Possibly async fan out (one insert into topic outbox)
+- Serialization support (System.Text.Json, Newtonsoft.Json, custom), (encrypt messages aes)
+- Message versioning
+- cron jobs, quartz, possibly pgcron
 - Polling: poll messages, poll health check. Option for using notify/listen?
 - Request/reply
 - Support for pgbouncer (transaction mode vs prepared statements)

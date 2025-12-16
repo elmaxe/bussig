@@ -1,6 +1,6 @@
-using Bussig.Messages;
+using Bussig.Abstractions.Messages;
 
-namespace Bussig;
+namespace Bussig.Abstractions;
 
 public interface IBus
 {

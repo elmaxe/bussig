@@ -66,6 +66,22 @@ public class PostgresMigrator(NpgsqlDataSource npgsqlDataSource, ILogger<Postgre
     private const string CreateInfrastructureSqlCommand =
         //lang=postgresql
         """
+            CREATE OR REPLACE FUNCTION "{0}".add_constraint_if_not_exists(
+                    a_table_name            TEXT
+                ,   a_constraint_name       TEXT
+                ,   a_constraint_sql         TEXT
+            ) RETURNS VOID AS
+            $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT constraint_name FROM information_schema.constraint_column_usage ccu
+                    WHERE ccu.table_name = a_table_name AND ccu.table_schema = '{0}'
+                    AND ccu.constraint_name = a_constraint_name AND ccu.constraint_schema = '{0}'
+                ) THEN EXECUTE a_constraint_sql;
+                END IF;
+            END;
+            $$ LANGUAGE plpgsql;
+
             CREATE SEQUENCE IF NOT EXISTS "{0}".topology_seq AS BIGINT;        
 
             CREATE TABLE IF NOT EXISTS "{0}".queues(
@@ -76,7 +92,7 @@ public class PostgresMigrator(NpgsqlDataSource npgsqlDataSource, ILogger<Postgre
                 ,   updated_at              TIMESTAMPTZ     NOT NULL DEFAULT (NOW() AT TIME ZONE 'utc')
             );
             CREATE UNIQUE INDEX IF NOT EXISTS queues_idx_name_type ON "{0}".queues (name, type) INCLUDE (queue_id);
-            ALTER TABLE "{0}".queues ADD CONSTRAINT unique_queue UNIQUE USING INDEX queues_idx_name_type;
+            SELECT "{0}".add_constraint_if_not_exists('queues', 'unique_queue', 'ALTER TABLE "{0}".queues ADD CONSTRAINT unique_queue UNIQUE USING INDEX queues_idx_name_type;');
 
             CREATE TABLE IF NOT EXISTS "{0}".messages (
                     message_id              UUID            NOT NULL PRIMARY KEY
@@ -213,18 +229,21 @@ public class PostgresMigrator(NpgsqlDataSource npgsqlDataSource, ILogger<Postgre
             ) RETURNS BIGINT AS
             $$
             DECLARE
-                v_visible_at    TIMESTAMPTZ;
+                v_visible_at            TIMESTAMPTZ;
+                v_message_delivery_id   BIGINT;
             BEGIN
                 v_visible_at := (NOW() AT TIME ZONE 'utc');
                 IF a_delay > INTERVAL '0 seconds' THEN
-                    v_visible_at = v_visible_at + a_delay;
+                    v_visible_at := v_visible_at + a_delay;
                 END IF;
                 
-                RETURN QUERY
                 UPDATE "{0}".message_delivery md
                 SET lock_id = NULL, visible_at = v_visible_at, message_delivery_headers = a_headers
-                WHERE md.message_delivery_id = a_message_delivery_id AND md.lock_id = a_lock_id 
-                RETURNING md.message_delivery_id;
+                WHERE md.message_delivery_id = a_message_delivery_id AND md.lock_id = a_lock_id
+                RETURNING md.message_delivery_id
+                INTO v_message_delivery_id;
+
+                RETURN v_message_delivery_id;
             END;
             $$ LANGUAGE plpgsql;
 
@@ -238,8 +257,9 @@ public class PostgresMigrator(NpgsqlDataSource npgsqlDataSource, ILogger<Postgre
             ) RETURNS BIGINT AS
             $$
             DECLARE
-                vl_dest_queue_id    BIGINT;
-                v_visible_at        TIMESTAMPTZ;
+                vl_dest_queue_id        BIGINT;
+                v_visible_at            TIMESTAMPTZ;
+                v_message_delivery_id   BIGINT;
             BEGIN
                 SELECT q.queue_id INTO vl_dest_queue_id FROM "{0}".queues q WHERE q.name = a_queue_name AND q.type = a_queue_type;
                 IF vl_dest_queue_id IS NULL THEN
@@ -251,11 +271,13 @@ public class PostgresMigrator(NpgsqlDataSource npgsqlDataSource, ILogger<Postgre
                     v_visible_at = v_visible_at + a_delay;
                 END IF;
 
-                RETURN QUERY
                 UPDATE "{0}".message_delivery md
                 SET queue_id = vl_dest_queue_id, visible_at = v_visible_at, lock_id = NULL, message_delivery_headers = a_headers
                 WHERE md.message_delivery_id = a_message_delivery_id AND md.lock_id = a_lock_id
-                RETURNING md.message_delivery_id;
+                RETURNING md.message_delivery_id
+                INTO v_message_delivery_id;
+                
+                RETURN v_message_delivery_id;
             END;
             $$ LANGUAGE plpgsql;
 
@@ -278,7 +300,8 @@ public class PostgresMigrator(NpgsqlDataSource npgsqlDataSource, ILogger<Postgre
             ) RETURNS BIGINT AS
             $$
             DECLARE 
-                v_visible_at    TIMESTAMPTZ;
+                v_visible_at            TIMESTAMPTZ;
+                v_message_delivery_id   BIGINT;
             BEGIN
                 IF a_duration IS NULL OR a_duration < INTERVAL '1 seconds' THEN
                     RAISE EXCEPTION 'Lock duration is invalid';
@@ -286,12 +309,13 @@ public class PostgresMigrator(NpgsqlDataSource npgsqlDataSource, ILogger<Postgre
                 
                 v_visible_at := (NOW() AT TIME ZONE 'utc') + a_duration;
                 
-                RETURN QUERY
                 UPDATE "{0}".message_delivery md
                 SET visible_at = v_visible_at
                 WHERE md.message_delivery_id = a_message_delivery_id AND md.lock_id = a_lock_id
-                RETURNING md.message_delivery_id;
+                RETURNING md.message_delivery_id
+                INTO v_message_delivery_id;
                 
+                RETURN v_message_delivery_id;
             END;
             $$ LANGUAGE plpgsql;
 
@@ -300,8 +324,8 @@ public class PostgresMigrator(NpgsqlDataSource npgsqlDataSource, ILogger<Postgre
             ) RETURNS BIGINT AS
             $$
             DECLARE
+                v_message_id    UUID;
             BEGIN
-                RETURN QUERY
                 DELETE FROM "{0}".messages m
                     USING "{0}".messages mm
                     LEFT JOIN "{0}".message_delivery md ON md.message_id = mm.message_id
@@ -309,7 +333,10 @@ public class PostgresMigrator(NpgsqlDataSource npgsqlDataSource, ILogger<Postgre
                 AND mm.message_id = m.message_id
                 AND md.delivery_count = 0
                 AND md.lock_id IS NULL
-                RETURNING m.message_id;
+                RETURNING m.message_id
+                INTO v_message_id;
+                
+                RETURN v_message_id;
             END;
             $$ LANGUAGE plpgsql;
 
@@ -392,8 +419,9 @@ public class PostgresMigrator(NpgsqlDataSource npgsqlDataSource, ILogger<Postgre
             ) RETURNS BIGINT[] AS
             $$
             DECLARE
-                v_queue_id  BIGINT;
-                v_now       TIMESTAMPTZ;
+                v_queue_id              BIGINT;
+                v_now                   TIMESTAMPTZ;
+                v_message_delivery_id   BIGINT;
             BEGIN
                 SELECT q.queue_id INTO v_queue_id FROM "{0}".queues q WHERE q.name = a_queue_name AND q.type = 2;
                 IF v_queue_id IS NULL THEN
@@ -403,7 +431,6 @@ public class PostgresMigrator(NpgsqlDataSource npgsqlDataSource, ILogger<Postgre
                 v_now := (NOW() AT TIME ZONE 'utc');
                 
                 IF a_count IS NOT NULL AND a_count > 0 THEN
-                    RETURN QUERY
                     WITH message_deliveries AS (
                         SELECT * FROM "{0}".message_delivery md
                         WHERE md.queue_id = v_queue_id
@@ -415,20 +442,26 @@ public class PostgresMigrator(NpgsqlDataSource npgsqlDataSource, ILogger<Postgre
                     SET delivery_count = 0, message_delivery_headers = NULL, visible_at = v_now, enqueued_at = v_now
                     FROM message_deliveries mdd
                     WHERE md.message_delivery_id = mdd.message_delivery_id
-                    RETURNING md.message_delivery_id;
+                    RETURNING md.message_delivery_id
+                    INTO v_message_delivery_id;
                     
+                    RETURN v_message_delivery_id;
                 ELSIF a_messages IS NOT NULL AND ARRAY_LENGTH(a_messages, 1) > 0 THEN
-                    RETURN QUERY
                     UPDATE "{0}".message_delivery md
                     SET delivery_count = 0, message_delivery_headers = NULL, visible_at = v_now, enqueued_at = v_now
                     WHERE md.queue_id = v_queue_id AND md.message_delivery_id = ANY(a_messages)
-                    RETURNING md.message_delivery_id;
+                    RETURNING md.message_delivery_id
+                    INTO v_message_delivery_id;
+                    
+                    RETURN v_message_delivery_id;
                 ELSE
-                    RETURN QUERY
                     UPDATE "{0}".message_delivery md
                     SET delivery_count = 0, message_delivery_headers = NULL, visible_at = v_now, enqueued_at = v_now
                     WHERE md.queue_id = v_queue_id
-                    RETURNING md.message_delivery_id;
+                    RETURNING md.message_delivery_id
+                    INTO v_message_delivery_id;
+                    
+                    RETURN v_message_delivery_id;
                 END IF;
             END;
             $$ LANGUAGE plpgsql;
