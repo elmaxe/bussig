@@ -1,4 +1,4 @@
-namespace Bussig.Core;
+namespace Bussig;
 
 [AttributeUsage(AttributeTargets.Class | AttributeTargets.Interface)]
 public class MessageMappingAttribute : Attribute

@@ -1,6 +1,6 @@
-using Bussig.Core.Messages;
+using Bussig.Messages;
 
-namespace Bussig.Core;
+namespace Bussig;
 
 public interface IBus
 {

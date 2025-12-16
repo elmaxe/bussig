@@ -1,3 +1,3 @@
-namespace Bussig.Core.Messages;
+namespace Bussig.Messages;
 
 public interface ICommand : IMessage;

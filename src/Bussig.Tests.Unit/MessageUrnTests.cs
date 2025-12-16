@@ -1,6 +1,6 @@
-using Bussig.Core;
+using Bussig;
 
-namespace Bussig.Postgres.Tests.Unit
+namespace Bussig.Tests.Unit
 {
     public class MessageUrnTests
     {
@@ -35,27 +35,21 @@ namespace Bussig.Postgres.Tests.Unit
         }
 
         [Test]
-        [Arguments(typeof(TopLevelClass), "urn:message:Bussig.Postgres.Tests.Unit:TopLevelClass")]
-        [Arguments(typeof(TopLevelRecord), "urn:message:Bussig.Postgres.Tests.Unit:TopLevelRecord")]
-        [Arguments(
-            typeof(ITopLevelInterface),
-            "urn:message:Bussig.Postgres.Tests.Unit:ITopLevelInterface"
-        )]
-        [Arguments(
-            typeof(Nester.NestedClass),
-            "urn:message:Bussig.Postgres.Tests.Unit:Nester+NestedClass"
-        )]
+        [Arguments(typeof(TopLevelClass), "urn:message:Bussig.Tests.Unit:TopLevelClass")]
+        [Arguments(typeof(TopLevelRecord), "urn:message:Bussig.Tests.Unit:TopLevelRecord")]
+        [Arguments(typeof(ITopLevelInterface), "urn:message:Bussig.Tests.Unit:ITopLevelInterface")]
+        [Arguments(typeof(Nester.NestedClass), "urn:message:Bussig.Tests.Unit:Nester+NestedClass")]
         [Arguments(
             typeof(TopLevelClassWithArguments<string>),
-            "urn:message:Bussig.Postgres.Tests.Unit:TopLevelClassWithArguments[[System:String]]"
+            "urn:message:Bussig.Tests.Unit:TopLevelClassWithArguments[[System:String]]"
         )]
         [Arguments(
             typeof(TopLevelClassWithArguments<TopLevelClass>),
-            "urn:message:Bussig.Postgres.Tests.Unit:TopLevelClassWithArguments[[Bussig.Postgres.Tests.Unit:TopLevelClass]]"
+            "urn:message:Bussig.Tests.Unit:TopLevelClassWithArguments[[Bussig.Tests.Unit:TopLevelClass]]"
         )]
         [Arguments(
             typeof(TopLevelClassWithMultipleArguments<TopLevelClass, string>),
-            "urn:message:Bussig.Postgres.Tests.Unit:TopLevelClassWithMultipleArguments[[Bussig.Postgres.Tests.Unit:TopLevelClass],[System:String]]"
+            "urn:message:Bussig.Tests.Unit:TopLevelClassWithMultipleArguments[[Bussig.Tests.Unit:TopLevelClass],[System:String]]"
         )]
         [Arguments(
             typeof(Nester.NestedClassWithGenericArguments<
@@ -63,7 +57,7 @@ namespace Bussig.Postgres.Tests.Unit
                 bool,
                 AnotherNamespace.ITopLevelInterface
             >),
-            "urn:message:Bussig.Postgres.Tests.Unit:Nester+NestedClassWithGenericArguments[[System:String],[System:Boolean],[AnotherNamespace:ITopLevelInterface]]"
+            "urn:message:Bussig.Tests.Unit:Nester+NestedClassWithGenericArguments[[System:String],[System:Boolean],[AnotherNamespace:ITopLevelInterface]]"
         )]
         [Arguments(
             typeof(AnotherNamespace.TopLevelClass),
@@ -83,14 +77,14 @@ namespace Bussig.Postgres.Tests.Unit
         )]
         [Arguments(
             typeof(AnotherNamespace.TopLevelClassWithArguments<TopLevelClass>),
-            "urn:message:AnotherNamespace:TopLevelClassWithArguments[[Bussig.Postgres.Tests.Unit:TopLevelClass]]"
+            "urn:message:AnotherNamespace:TopLevelClassWithArguments[[Bussig.Tests.Unit:TopLevelClass]]"
         )]
         [Arguments(
             typeof(AnotherNamespace.TopLevelClassWithMultipleArguments<
                 TopLevelClass,
                 AnotherNamespace.TopLevelClass
             >),
-            "urn:message:AnotherNamespace:TopLevelClassWithMultipleArguments[[Bussig.Postgres.Tests.Unit:TopLevelClass],[AnotherNamespace:TopLevelClass]]"
+            "urn:message:AnotherNamespace:TopLevelClassWithMultipleArguments[[Bussig.Tests.Unit:TopLevelClass],[AnotherNamespace:TopLevelClass]]"
         )]
         public async Task ForType_WithoutAttribute_IsCorrect(Type type, string expected)
         {

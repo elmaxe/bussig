@@ -1,5 +1,4 @@
-using Bussig.Core;
-using Bussig.Core.Messages;
+using Bussig.Messages;
 
 namespace Bussig.Postgres;
 

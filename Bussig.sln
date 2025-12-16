@@ -2,7 +2,7 @@
 Microsoft Visual Studio Solution File, Format Version 12.00
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Bussig.Postgres", "src\Bussig.Postgres\Bussig.Postgres.csproj", "{E7D4E7B6-A289-4F3A-91AA-3EE503067C53}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Bussig.Core", "src\Bussig.Core\Bussig.Core.csproj", "{02DE2C15-5CCA-47A3-8629-7D6C1B78FEB8}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Bussig", "src\Bussig\Bussig.csproj", "{02DE2C15-5CCA-47A3-8629-7D6C1B78FEB8}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution Items", "{C1896508-A0BC-41BD-B793-938EB40F819D}"
 	ProjectSection(SolutionItems) = preProject
@@ -14,7 +14,7 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution 
 		.config\dotnet-tools.json = .config\dotnet-tools.json
 	EndProjectSection
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Bussig.Postgres.Tests.Unit", "src\Bussig.Postgres.Tests.Unit\Bussig.Postgres.Tests.Unit.csproj", "{9E51524C-9E61-4EDF-AF25-676A48E8F3B9}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Bussig.Tests.Unit", "src\Bussig.Tests.Unit\Bussig.Tests.Unit.csproj", "{9E51524C-9E61-4EDF-AF25-676A48E8F3B9}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Tests", "Tests", "{2FE1F5E3-F41C-4DDC-AC2D-9F671193F5B4}"
 EndProject

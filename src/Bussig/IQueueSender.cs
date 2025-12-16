@@ -1,3 +1,3 @@
-namespace Bussig.Core;
+namespace Bussig;
 
 public interface IQueueSender { }

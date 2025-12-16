@@ -1,7 +1,7 @@
 using System.Reflection;
 using System.Text;
 
-namespace Bussig.Core;
+namespace Bussig;
 
 public readonly record struct MessageUrn
 {
