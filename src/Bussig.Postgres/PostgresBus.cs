@@ -1,37 +1,98 @@
+using System.Text.Json;
 using Bussig.Abstractions;
 using Bussig.Abstractions.Messages;
+using SecurityDriven;
 
 namespace Bussig.Postgres;
 
-public sealed class PostgresBus(PostgresQueueSender queueSender) : IBus
+public sealed class PostgresBus : IBus
 {
+    private static readonly JsonSerializerOptions HeaderJsonOptions = new(
+        JsonSerializerDefaults.Web
+    );
+    private readonly IOutgoingMessageSender _messageSender;
+    private readonly IMessageSerializer _serializer;
+
+    public PostgresBus(IOutgoingMessageSender messageSender, IMessageSerializer serializer)
+    {
+        _messageSender = messageSender;
+        _serializer = serializer;
+    }
+
+    // TODO: Message send options for priority, version, expiration, headers, etc
     public Task SendAsync<TMessage>(TMessage message, CancellationToken cancellationToken)
         where TMessage : ICommand
     {
-        throw new NotImplementedException();
-    }
-
-    public Task SendAsync<TMessage>(
-        IEnumerable<TMessage> messages,
-        CancellationToken cancellationToken
-    )
-        where TMessage : ICommand
-    {
-        throw new NotImplementedException();
-    }
-
-    public Task ScheduleAsync<TMessage>(TMessage message, CancellationToken cancellationToken)
-        where TMessage : ICommand
-    {
-        throw new NotImplementedException();
+        return SendAsyncInternal(message, null, null, cancellationToken);
     }
 
     public Task ScheduleAsync<TMessage>(
-        IEnumerable<TMessage> messages,
+        TMessage message,
+        TimeSpan delay,
+        Guid? schedulingToken,
         CancellationToken cancellationToken
     )
         where TMessage : ICommand
     {
-        throw new NotImplementedException();
+        return SendAsyncInternal(message, delay, schedulingToken, cancellationToken);
+    }
+
+    public Task ScheduleAsync<TMessage>(
+        TMessage message,
+        DateTimeOffset visibleAt,
+        Guid? schedulingToken,
+        CancellationToken cancellationToken
+    )
+        where TMessage : ICommand
+    {
+        if (visibleAt < DateTimeOffset.UtcNow)
+        {
+            throw new ArgumentException($"{nameof(visibleAt)} should be in the future");
+        }
+        return SendAsyncInternal(
+            message,
+            visibleAt - DateTimeOffset.UtcNow,
+            schedulingToken,
+            cancellationToken
+        );
+    }
+
+    private async Task SendAsyncInternal<TMessage>(
+        TMessage message,
+        TimeSpan? delay,
+        Guid? schedulingToken,
+        CancellationToken cancellationToken
+    )
+        where TMessage : ICommand
+    {
+        var queueName = MessageMetadata<TMessage>.QueueName;
+        var headersJson = MessageMetadata<TMessage>.HeadersJson;
+
+        var body = _serializer.SerializeToUtf8Bytes(message);
+        var outgoing = new OutgoingMessage(
+            FastGuid.NewPostgreSqlGuid(),
+            queueName,
+            body,
+            headersJson
+        )
+        {
+            Delay = delay,
+            SchedulingTokenId = schedulingToken,
+        };
+        await _messageSender.SendAsync(outgoing, cancellationToken);
+    }
+
+    private static string CreateHeadersJson(string messageType)
+    {
+        var headers = new Dictionary<string, object> { ["message-types"] = new[] { messageType } };
+
+        return JsonSerializer.Serialize(headers, HeaderJsonOptions);
+    }
+
+    private static class MessageMetadata<TMessage>
+        where TMessage : ICommand
+    {
+        public static readonly string QueueName = MessageUrn.ForType<TMessage>().ToString();
+        public static readonly string HeadersJson = CreateHeadersJson(QueueName);
     }
 }

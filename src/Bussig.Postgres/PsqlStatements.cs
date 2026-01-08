@@ -3,7 +3,7 @@ namespace Bussig.Postgres;
 public class PsqlStatements
 {
     public const string SendMessage =
-        """SELECT * FROM "{0}".send_message($1, $2, $3, $4, $5, $6, $8, $9);""";
+        """SELECT * FROM "{0}".send_message($1, $2, $3, $4, $5, $6, $7, $8, $9);""";
 
     public const string CreateQueue = """SELECT * FROM "{0}".create_queue($1, $2);""";
 

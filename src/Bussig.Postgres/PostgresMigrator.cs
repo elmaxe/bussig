@@ -1,12 +1,8 @@
+using Bussig.Postgres.Configuration;
 using Microsoft.Extensions.Logging;
 using Npgsql;
 
 namespace Bussig.Postgres;
-
-public static class TransportConstants
-{
-    public const string DefaultSchemaName = "bussig";
-}
 
 public enum PostgresVersion
 {

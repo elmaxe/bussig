@@ -4,17 +4,40 @@ namespace Bussig;
 
 public class BussigRegistrationConfigurator : IBussigRegistrationConfigurator
 {
-    public string ConnectionString { get; set; } = null!;
-    public IPostgresSettings? Settings { get; set; } = null;
-    public readonly HashSet<Type> Messages = [];
+    private readonly HashSet<Type> _messages = [];
+    private readonly Dictionary<Type, QueueOptions> _queueOptions = new();
 
-    public void AddMessage<TMessage>()
+    public string ConnectionString { get; set; } = null!;
+    public string? Schema { get; set; }
+    public IPostgresSettings? Settings { get; set; } = null;
+    public bool CreateQueuesOnStartup { get; set; } = true;
+    public IReadOnlyCollection<Type> Messages => _messages;
+
+    public void AddMessage<TMessage>(Action<QueueOptions>? configure = null)
     {
-        Messages.Add(typeof(TMessage));
+        AddMessage(typeof(TMessage), configure);
     }
 
-    public void AddMessage(Type message)
+    public void AddMessage(Type message, Action<QueueOptions>? configure = null)
     {
-        Messages.Add(message);
+        _messages.Add(message);
+        configure?.Invoke(GetOrCreateOptions(message));
+    }
+
+    public bool TryGetQueueOptions(Type message, out QueueOptions options)
+    {
+        return _queueOptions.TryGetValue(message, out options!);
+    }
+
+    private QueueOptions GetOrCreateOptions(Type message)
+    {
+        if (_queueOptions.TryGetValue(message, out var options))
+        {
+            return options;
+        }
+
+        options = new QueueOptions();
+        _queueOptions[message] = options;
+        return options;
     }
 }
