@@ -1,3 +1,5 @@
+using Bussig.Abstractions;
+using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
 
 namespace Bussig.Postgres;
@@ -10,9 +12,12 @@ public interface IPostgresConnectionContext
 public class PostgresConnectionContext : IPostgresConnectionContext
 {
     private readonly NpgsqlDataSource _npgsqlDataSource;
-    public readonly PostgresSettings Settings;
+    public readonly IPostgresSettings Settings;
 
-    public PostgresConnectionContext(NpgsqlDataSource npgsqlDataSource, PostgresSettings settings)
+    public PostgresConnectionContext(
+        [FromKeyedServices(BussigServiceKeys.BussigNpgsql)] NpgsqlDataSource npgsqlDataSource,
+        IPostgresSettings settings
+    )
     {
         _npgsqlDataSource = npgsqlDataSource;
         Settings = settings;

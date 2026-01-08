@@ -2,11 +2,16 @@ using Microsoft.Extensions.Hosting;
 
 namespace Bussig;
 
-public class BussigHostedService : IHostedService
+public class BussigHostedService() : IHostedService
 {
-    public Task StartAsync(CancellationToken cancellationToken)
+    public async Task StartAsync(CancellationToken cancellationToken)
     {
-        throw new NotImplementedException();
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            // TODO: Create queues for registered message types
+            //
+            await Task.Delay(100, cancellationToken);
+        }
     }
 
     public Task StopAsync(CancellationToken cancellationToken)

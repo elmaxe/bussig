@@ -1,8 +1,9 @@
+using Bussig.Abstractions;
 using Npgsql;
 
 namespace Bussig.Postgres;
 
-public class PostgresSettings
+public class PostgresSettings : IPostgresSettings
 {
     public string Schema { get; private set; }
 
