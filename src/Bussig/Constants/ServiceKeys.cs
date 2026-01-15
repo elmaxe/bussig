@@ -1,6 +1,6 @@
-namespace Bussig;
+namespace Bussig.Constants;
 
-public static class BussigServiceKeys
+public static class ServiceKeys
 {
     public const string BussigNpgsql = "BussigNpgsql";
 }

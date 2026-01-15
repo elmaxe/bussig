@@ -1,3 +1,3 @@
-namespace Bussig.Messages;
+namespace Bussig.Abstractions.Messages;
 
 public interface IEvent : IMessage;

@@ -1,28 +1,20 @@
+using Bussig.Constants;
+using Bussig.Postgres.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Npgsql;
 
 namespace Bussig.Postgres;
 
-public static class TransportConstants
-{
-    public const string DefaultSchemaName = "bussig";
-}
-
-public enum PostgresVersion
-{
-    Pg15 = 15,
-    Pg16 = 16,
-    Pg17 = 17,
-    Pg18 = 18,
-}
-
 public class TransportOptions
 {
     public string SchemaName { get; set; } = TransportConstants.DefaultSchemaName;
-    public PostgresVersion PostgresVersion { get; set; }
 }
 
-public class PostgresMigrator(NpgsqlDataSource npgsqlDataSource, ILogger<PostgresMigrator> logger)
+public class PostgresMigrator(
+    [FromKeyedServices(ServiceKeys.BussigNpgsql)] NpgsqlDataSource npgsqlDataSource,
+    ILogger<PostgresMigrator> logger
+)
 {
     public async Task CreateSchema(TransportOptions options, CancellationToken cancellationToken)
     {
@@ -123,6 +115,12 @@ public class PostgresMigrator(NpgsqlDataSource npgsqlDataSource, ILogger<Postgre
             CREATE INDEX IF NOT EXISTS message_delivery_idx_fetch ON "{0}".message_delivery (queue_id, priority ASC, visible_at, message_delivery_id);
             CREATE INDEX IF NOT EXISTS message_delivery_idx_message_id ON "{0}".message_delivery (message_id);
 
+            CREATE TABLE IF NOT EXISTS "{0}".distributed_locks (
+                    lock_id             TEXT            PRIMARY KEY NOT NULL
+                ,   expires_at          TIMESTAMPTZ     NOT NULL
+                ,   acquired_at         TIMESTAMPTZ     NOT NULL
+            );
+
             CREATE OR REPLACE FUNCTION "{0}".get_messages(
                     a_queue_name          TEXT
                 ,   a_lock_id             UUID
@@ -164,7 +162,7 @@ public class PostgresMigrator(NpgsqlDataSource npgsqlDataSource, ILogger<Postgre
                 RETURN QUERY
                 WITH msgs AS (
                     SELECT md.* FROM "{0}".message_delivery md
-                    WHERE queue_id = v_queue_id
+                    WHERE md.queue_id = v_queue_id
                     AND md.visible_at <= v_now
                     AND md.delivery_count < md.max_delivery_count
                     ORDER BY md.priority, md.visible_at, md.message_delivery_id
@@ -252,8 +250,8 @@ public class PostgresMigrator(NpgsqlDataSource npgsqlDataSource, ILogger<Postgre
                 ,   a_lock_id                   UUID
                 ,   a_queue_type                SMALLINT
                 ,   a_queue_name                TEXT
-                ,   a_headers                   JSON
-                ,   a_delay                     INTERVAL DEFAULT '0 seconds'
+                ,   a_headers                   JSONB
+                ,   a_delay                     INTERVAL DEFAULT INTERVAL '0 seconds'
             ) RETURNS BIGINT AS
             $$
             DECLARE
@@ -285,11 +283,11 @@ public class PostgresMigrator(NpgsqlDataSource npgsqlDataSource, ILogger<Postgre
                     a_message_delivery_id       BIGINT
                 ,   a_lock_id                   UUID
                 ,   a_queue_name                TEXT
-                ,   a_headers                   JSON
+                ,   a_headers                   JSONB
             ) RETURNS BIGINT AS
             $$
             BEGIN
-                RETURN "{0}".move_message(a_message_delivery_id, a_lock_id, 2, a_queue_name, a_headers);
+                RETURN "{0}".move_message(a_message_delivery_id, a_lock_id, 2::SMALLINT, a_queue_name, a_headers);
             END;
             $$ LANGUAGE plpgsql;
 
@@ -319,7 +317,7 @@ public class PostgresMigrator(NpgsqlDataSource npgsqlDataSource, ILogger<Postgre
             END;
             $$ LANGUAGE plpgsql;
 
-            CREATE OR REPLACE FUNCTION "{0}".delete_scheduled_message(
+            CREATE OR REPLACE FUNCTION "{0}".cancel_scheduled_message(
                     a_scheduling_token_id     UUID
             ) RETURNS BIGINT AS
             $$
@@ -373,7 +371,7 @@ public class PostgresMigrator(NpgsqlDataSource npgsqlDataSource, ILogger<Postgre
             CREATE OR REPLACE FUNCTION "{0}".send_message(
                     a_queue_name            TEXT
                 ,   a_message_id            UUID
-                ,   a_priority              INTEGER     DEFAULT NULL
+                ,   a_priority              SMALLINT    DEFAULT NULL
                 ,   a_body                  BYTEA       DEFAULT NULL
                 ,   a_delay                 INTERVAL    DEFAULT INTERVAL '0 seconds'
                 ,   a_headers               JSONB       DEFAULT NULL
@@ -405,12 +403,13 @@ public class PostgresMigrator(NpgsqlDataSource npgsqlDataSource, ILogger<Postgre
                 VALUES (a_message_id, a_body, a_headers, a_message_version, a_scheduling_token_id);
                 
                 INSERT INTO "{0}".message_delivery(message_id, queue_id, priority, visible_at, enqueued_at, delivery_count, max_delivery_count, expiration_time)
-                VALUES (a_message_id, v_queue_id, a_priority, v_visible_at, v_enqueued_at, 0, v_max_delivery_count, a_expiration_time);
+                VALUES (a_message_id, v_queue_id, COALESCE(a_priority, 16384), v_visible_at, v_enqueued_at, 0, v_max_delivery_count, a_expiration_time);
 
                 RETURN 1;
             END;
             $$ LANGUAGE plpgsql;
 
+            -- todo this doesn't work
             -- Management
             CREATE OR REPLACE FUNCTION "{0}".requeue_deadletters(
                     a_queue_name        TEXT
@@ -421,7 +420,7 @@ public class PostgresMigrator(NpgsqlDataSource npgsqlDataSource, ILogger<Postgre
             DECLARE
                 v_queue_id              BIGINT;
                 v_now                   TIMESTAMPTZ;
-                v_message_delivery_id   BIGINT;
+                v_ids   BIGINT;
             BEGIN
                 SELECT q.queue_id INTO v_queue_id FROM "{0}".queues q WHERE q.name = a_queue_name AND q.type = 2;
                 IF v_queue_id IS NULL THEN
@@ -437,31 +436,45 @@ public class PostgresMigrator(NpgsqlDataSource npgsqlDataSource, ILogger<Postgre
                         ORDER BY md.visible_at, md.message_delivery_id
                         LIMIT a_count
                         FOR UPDATE OF md SKIP LOCKED
+                    ),
+                    updated AS (
+                        UPDATE "{0}".message_delivery md
+                        SET delivery_count = 0, message_delivery_headers = NULL, visible_at = v_now, enqueued_at = v_now
+                        FROM message_deliveries mdd
+                        WHERE md.message_delivery_id = mdd.message_delivery_id
+                        RETURNING md.message_delivery_id
                     )
-                    UPDATE "{0}".message_delivery md
-                    SET delivery_count = 0, message_delivery_headers = NULL, visible_at = v_now, enqueued_at = v_now
-                    FROM message_deliveries mdd
-                    WHERE md.message_delivery_id = mdd.message_delivery_id
-                    RETURNING md.message_delivery_id
-                    INTO v_message_delivery_id;
+                    SELECT COALESCE(ARRAY_AGG(message_delivery_id), ARRAY[]::bigint[])
+                    INTO v_ids
+                    FROM updated;
                     
-                    RETURN v_message_delivery_id;
+                    RETURN v_ids;
+                    
                 ELSIF a_messages IS NOT NULL AND ARRAY_LENGTH(a_messages, 1) > 0 THEN
-                    UPDATE "{0}".message_delivery md
-                    SET delivery_count = 0, message_delivery_headers = NULL, visible_at = v_now, enqueued_at = v_now
-                    WHERE md.queue_id = v_queue_id AND md.message_delivery_id = ANY(a_messages)
-                    RETURNING md.message_delivery_id
-                    INTO v_message_delivery_id;
+                    WITH updated AS (
+                        UPDATE "{0}".message_delivery md
+                        SET delivery_count = 0, message_delivery_headers = NULL, visible_at = v_now, enqueued_at = v_now
+                        WHERE md.queue_id = v_queue_id AND md.message_delivery_id = ANY(a_messages)
+                        RETURNING md.message_delivery_id
+                    )
+                    SELECT COALESCE(ARRAY_AGG(message_delivery_id), ARRAY[]::bigint[])
+                    INTO v_ids
+                    FROM updated;
                     
-                    RETURN v_message_delivery_id;
+                    RETURN v_ids;
+                    
                 ELSE
-                    UPDATE "{0}".message_delivery md
-                    SET delivery_count = 0, message_delivery_headers = NULL, visible_at = v_now, enqueued_at = v_now
-                    WHERE md.queue_id = v_queue_id
-                    RETURNING md.message_delivery_id
-                    INTO v_message_delivery_id;
-                    
-                    RETURN v_message_delivery_id;
+                    WITH updated AS (
+                        UPDATE "{0}".message_delivery md
+                        SET delivery_count = 0, message_delivery_headers = NULL, visible_at = v_now, enqueued_at = v_now
+                        WHERE md.queue_id = v_queue_id
+                        RETURNING md.message_delivery_id
+                    )
+                    SELECT COALESCE(ARRAY_AGG(message_delivery_id), ARRAY[]::bigint[])
+                    INTO v_ids
+                    FROM updated;
+
+                    RETURN v_ids;
                 END IF;
             END;
             $$ LANGUAGE plpgsql;
