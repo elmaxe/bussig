@@ -1,43 +1,38 @@
+using Bussig.Abstractions;
 using Bussig.Constants;
-using Bussig.Postgres.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Npgsql;
 
 namespace Bussig.Postgres;
 
-public class TransportOptions
-{
-    public string SchemaName { get; set; } = TransportConstants.DefaultSchemaName;
-}
-
 public class PostgresMigrator(
     [FromKeyedServices(ServiceKeys.BussigNpgsql)] NpgsqlDataSource npgsqlDataSource,
     ILogger<PostgresMigrator> logger
 )
 {
-    public async Task CreateSchema(TransportOptions options, CancellationToken cancellationToken)
+    public async Task CreateSchema(IPostgresSettings options, CancellationToken cancellationToken)
     {
         await using var connection = await npgsqlDataSource.OpenConnectionAsync(cancellationToken);
 
         await using var command = new NpgsqlCommand(
-            string.Format(CreateSchemaSqlCommand, options.SchemaName),
+            string.Format(CreateSchemaSqlCommand, options.Schema),
             connection
         );
         await command.ExecuteScalarAsync(cancellationToken);
 
-        logger.LogDebug("Schema {Schema} created", options.SchemaName);
+        logger.LogDebug("Schema {Schema} created", options.Schema);
     }
 
     public async Task CreateInfrastructure(
-        TransportOptions options,
+        IPostgresSettings options,
         CancellationToken cancellationToken
     )
     {
         await using var connection = await npgsqlDataSource.OpenConnectionAsync(cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
 
-        var formattedCmdStr = string.Format(CreateInfrastructureSqlCommand, options.SchemaName);
+        var formattedCmdStr = string.Format(CreateInfrastructureSqlCommand, options.Schema);
         await using (var command = new NpgsqlCommand(formattedCmdStr, connection, transaction))
         {
             await command.ExecuteScalarAsync(cancellationToken);
@@ -45,7 +40,7 @@ public class PostgresMigrator(
 
         await transaction.CommitAsync(CancellationToken.None);
 
-        logger.LogDebug("Transport infrastructure in schema {Schema} upserted", options.SchemaName);
+        logger.LogDebug("Transport infrastructure in schema {Schema} upserted", options.Schema);
     }
 
     private const string CreateSchemaSqlCommand =

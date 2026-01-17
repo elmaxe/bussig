@@ -31,9 +31,8 @@ public sealed class BussigStartup(
                 return;
             }
 
-            var options = new TransportOptions { SchemaName = settings.Schema };
-            await migrator.CreateSchema(options, cancellationToken);
-            await migrator.CreateInfrastructure(options, cancellationToken);
+            await migrator.CreateSchema(settings, cancellationToken);
+            await migrator.CreateInfrastructure(settings, cancellationToken);
 
             if (configurator.CreateQueuesOnStartup)
             {

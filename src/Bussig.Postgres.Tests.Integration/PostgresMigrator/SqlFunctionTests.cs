@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Bussig.Postgres.Configuration;
 using Microsoft.Extensions.Logging;
 using Moq;
 using Npgsql;
@@ -712,7 +713,7 @@ public class SqlFunctionTests
             dataSource,
             Mock.Of<ILogger<Postgres.PostgresMigrator>>()
         );
-        var options = new TransportOptions { SchemaName = schema };
+        var options = new PostgresSettings(container.GetConnectionString(), schema);
 
         await migrator.CreateSchema(options, cancellationToken);
         await migrator.CreateInfrastructure(options, cancellationToken);
