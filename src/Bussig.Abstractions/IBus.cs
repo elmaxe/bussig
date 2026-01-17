@@ -22,7 +22,7 @@ public interface IBus
     )
         where TMessage : ICommand;
 
-    Task<long> CancelScheduledAsync(
+    Task<bool> CancelScheduledAsync(
         Guid schedulingToken,
         CancellationToken cancellationToken = default
     );

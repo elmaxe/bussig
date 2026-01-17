@@ -119,6 +119,8 @@ public class PostgresMigrator(
                     lock_id             TEXT            PRIMARY KEY NOT NULL
                 ,   expires_at          TIMESTAMPTZ     NOT NULL
                 ,   acquired_at         TIMESTAMPTZ     NOT NULL
+                ,   owner_token         UUID            NOT NULL
+                ,   extended_times      INTEGER         NOT NULL DEFAULT 0
             );
 
             CREATE OR REPLACE FUNCTION "{0}".get_messages(
@@ -319,7 +321,7 @@ public class PostgresMigrator(
 
             CREATE OR REPLACE FUNCTION "{0}".cancel_scheduled_message(
                     a_scheduling_token_id     UUID
-            ) RETURNS BIGINT AS
+            ) RETURNS UUID AS
             $$
             DECLARE
                 v_message_id    UUID;
@@ -409,75 +411,81 @@ public class PostgresMigrator(
             END;
             $$ LANGUAGE plpgsql;
 
-            -- todo this doesn't work
-            -- Management
-            CREATE OR REPLACE FUNCTION "{0}".requeue_deadletters(
-                    a_queue_name        TEXT
-                ,   a_count             BIGINT    DEFAULT NULL
-                ,   a_messages          BIGINT[]  DEFAULT NULL
-            ) RETURNS BIGINT[] AS
+            CREATE OR REPLACE FUNCTION "{0}".acquire_lock(
+                    a_lock_id               TEXT
+                ,   a_duration              INTERVAL
+                ,   a_owner_token           UUID
+            ) RETURNS BOOLEAN AS
             $$
             DECLARE
-                v_queue_id              BIGINT;
-                v_now                   TIMESTAMPTZ;
-                v_ids   BIGINT;
+                    v_now           TIMESTAMPTZ;
+                    v_expires_at    TIMESTAMPTZ;
+                    v_upserted      INTEGER;
             BEGIN
-                SELECT q.queue_id INTO v_queue_id FROM "{0}".queues q WHERE q.name = a_queue_name AND q.type = 2;
-                IF v_queue_id IS NULL THEN
-                    RAISE EXCEPTION 'Queue does not exist: %s', a_queue_name;
+                IF a_duration < INTERVAL '1 second' THEN
+                    RAISE EXCEPTION 'Duration must be greater than 0 seconds';
                 END IF;
                 
                 v_now := (NOW() AT TIME ZONE 'utc');
+                v_expires_at := v_now + a_duration;
                 
-                IF a_count IS NOT NULL AND a_count > 0 THEN
-                    WITH message_deliveries AS (
-                        SELECT * FROM "{0}".message_delivery md
-                        WHERE md.queue_id = v_queue_id
-                        ORDER BY md.visible_at, md.message_delivery_id
-                        LIMIT a_count
-                        FOR UPDATE OF md SKIP LOCKED
-                    ),
-                    updated AS (
-                        UPDATE "{0}".message_delivery md
-                        SET delivery_count = 0, message_delivery_headers = NULL, visible_at = v_now, enqueued_at = v_now
-                        FROM message_deliveries mdd
-                        WHERE md.message_delivery_id = mdd.message_delivery_id
-                        RETURNING md.message_delivery_id
-                    )
-                    SELECT COALESCE(ARRAY_AGG(message_delivery_id), ARRAY[]::bigint[])
-                    INTO v_ids
-                    FROM updated;
-                    
-                    RETURN v_ids;
-                    
-                ELSIF a_messages IS NOT NULL AND ARRAY_LENGTH(a_messages, 1) > 0 THEN
-                    WITH updated AS (
-                        UPDATE "{0}".message_delivery md
-                        SET delivery_count = 0, message_delivery_headers = NULL, visible_at = v_now, enqueued_at = v_now
-                        WHERE md.queue_id = v_queue_id AND md.message_delivery_id = ANY(a_messages)
-                        RETURNING md.message_delivery_id
-                    )
-                    SELECT COALESCE(ARRAY_AGG(message_delivery_id), ARRAY[]::bigint[])
-                    INTO v_ids
-                    FROM updated;
-                    
-                    RETURN v_ids;
-                    
-                ELSE
-                    WITH updated AS (
-                        UPDATE "{0}".message_delivery md
-                        SET delivery_count = 0, message_delivery_headers = NULL, visible_at = v_now, enqueued_at = v_now
-                        WHERE md.queue_id = v_queue_id
-                        RETURNING md.message_delivery_id
-                    )
-                    SELECT COALESCE(ARRAY_AGG(message_delivery_id), ARRAY[]::bigint[])
-                    INTO v_ids
-                    FROM updated;
-
-                    RETURN v_ids;
-                END IF;
+                INSERT INTO "{0}".distributed_locks AS dl (lock_id, expires_at, acquired_at, owner_token)
+                VALUES (a_lock_id, v_expires_at, v_now, a_owner_token)
+                ON CONFLICT (lock_id) DO UPDATE SET
+                    expires_at = EXCLUDED.expires_at,
+                    acquired_at = EXCLUDED.acquired_at,
+                    owner_token = EXCLUDED.owner_token,
+                    extended_times = 0
+                WHERE dl.expires_at <= v_now;
+                
+                GET DIAGNOSTICS v_upserted = ROW_COUNT;
+                RETURN v_upserted = 1;
             END;
             $$ LANGUAGE plpgsql;
+
+            CREATE OR REPLACE FUNCTION "{0}".release_lock(
+                    a_lock_id           TEXT
+                ,   a_owner_token       UUID
+            ) RETURNS BOOLEAN AS
+            $$
+            DECLARE
+                v_deleted   INTEGER;
+            BEGIN
+                DELETE FROM "{0}".distributed_locks
+                WHERE lock_id = a_lock_id AND owner_token = a_owner_token;
+                
+                GET DIAGNOSTICS v_deleted = ROW_COUNT;
+                RETURN v_deleted = 1;
+            END;
+            $$ LANGUAGE plpgsql;
+
+            CREATE OR REPLACE FUNCTION "{0}".renew_lock(
+                    a_lock_id           TEXT
+                ,   a_owner_token       UUID
+                ,   a_duration          INTERVAL
+            ) RETURNS BOOLEAN AS
+            $$
+            DECLARE
+                v_now           TIMESTAMPTZ := NOW() AT TIME ZONE 'utc';
+                v_expires_at    TIMESTAMPTZ;
+                v_updated       INTEGER;
+            BEGIN
+                IF a_duration < INTERVAL '1 second' THEN
+                    RAISE EXCEPTION 'Duration must be greater than 0 seconds';
+                END IF;
+                
+                v_expires_at := v_now + a_duration;
+                
+                UPDATE "{0}".distributed_locks dl
+                SET expires_at = v_expires_at, extended_times = dl.extended_times + 1
+                WHERE lock_id = a_lock_id AND owner_token = a_owner_token AND dl.expires_at > v_now;
+                
+                GET DIAGNOSTICS v_updated = ROW_COUNT;
+                RETURN v_updated = 1;
+            END;
+            $$ LANGUAGE plpgsql;
+
+            -- Management
 
             CREATE OR REPLACE FUNCTION "{0}".peek_deadletters(
                     a_queue_name        TEXT

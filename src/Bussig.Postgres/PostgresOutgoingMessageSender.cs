@@ -48,17 +48,19 @@ public sealed class PostgresOutgoingMessageSender : IOutgoingMessageSender
         return (long)await command.ExecuteScalarAsync(cancellationToken);
     }
 
-    public async Task<long> CancelAsync(Guid schedulingToken, CancellationToken cancellationToken)
+    public async Task<bool> CancelAsync(Guid schedulingToken, CancellationToken cancellationToken)
     {
         NpgsqlParameter[] parameters = [new NpgsqlParameter<Guid> { TypedValue = schedulingToken }];
         var transaction = _transactionAccessor.CurrentTransaction;
         if (transaction is null)
         {
-            return await _connectionContext.Query<long?>(
+            return (
+                await _connectionContext.Query<Guid?>(
                     _cancelScheduledSql,
                     parameters,
                     cancellationToken
-                ) ?? -1L;
+                )
+            ).HasValue;
         }
 
         var connection = transaction.Connection;
@@ -69,9 +71,9 @@ public sealed class PostgresOutgoingMessageSender : IOutgoingMessageSender
 
         await using var command = new NpgsqlCommand(_cancelScheduledSql, connection, transaction);
         command.Parameters.Add(new NpgsqlParameter<Guid> { TypedValue = schedulingToken });
-        var result = (long?)await command.ExecuteScalarAsync(cancellationToken);
+        var result = (Guid?)await command.ExecuteScalarAsync(cancellationToken);
 
-        return result ?? -1L;
+        return result.HasValue;
     }
 
     private static NpgsqlParameter[] BuildSendParameters(OutgoingMessage message)

@@ -57,7 +57,7 @@ public sealed class Bus : IBus
         );
     }
 
-    public async Task<long> CancelScheduledAsync(
+    public async Task<bool> CancelScheduledAsync(
         Guid schedulingToken,
         CancellationToken cancellationToken = default
     )

@@ -18,4 +18,8 @@ public class PsqlStatements
 
     public const string CancelScheduledMessage =
         """SELECT * FROM "{0}".cancel_scheduled_message($1);""";
+
+    public const string AcquireLock = """SELECT * FROM "{0}".acquire_lock($1, $2, $3)""";
+    public const string ReleaseLock = """SELECT * FROM "{0}".acquire_lock($1, $2)""";
+    public const string RenewLock = """SELECT * FROM "{0}".acquire_lock($1, $2, $3)""";
 }
