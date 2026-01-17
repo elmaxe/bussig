@@ -3,12 +3,12 @@ using Npgsql;
 
 namespace Bussig.Postgres;
 
-public sealed class PostgresQueueSender : IQueueSender
+public sealed class PostgresQueueCreator : IQueueCreator
 {
     private readonly PostgresConnectionContext _postgresConnectionContext;
     private readonly string _createQueueSql;
 
-    public PostgresQueueSender(PostgresConnectionContext postgresConnectionContext)
+    public PostgresQueueCreator(PostgresConnectionContext postgresConnectionContext)
     {
         _postgresConnectionContext = postgresConnectionContext;
 

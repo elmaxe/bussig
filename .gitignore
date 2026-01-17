@@ -3,6 +3,8 @@
 ##
 ## Get latest from `dotnet new gitignore`
 
+src/examples/Playground
+
 # dotenv files
 .env
 

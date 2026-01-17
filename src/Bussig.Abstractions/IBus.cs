@@ -4,18 +4,26 @@ namespace Bussig.Abstractions;
 
 public interface IBus
 {
-    Task SendAsync<TMessage>(TMessage message, CancellationToken cancellationToken)
-        where TMessage : ICommand;
-
-    Task SendAsync<TMessage>(IEnumerable<TMessage> messages, CancellationToken cancellationToken)
-        where TMessage : ICommand;
-
-    Task ScheduleAsync<TMessage>(TMessage message, CancellationToken cancellationToken)
+    Task SendAsync<TMessage>(TMessage message, CancellationToken cancellationToken = default)
         where TMessage : ICommand;
 
     Task ScheduleAsync<TMessage>(
-        IEnumerable<TMessage> messages,
-        CancellationToken cancellationToken
+        TMessage message,
+        TimeSpan delay,
+        Guid? schedulingToken = null,
+        CancellationToken cancellationToken = default
     )
         where TMessage : ICommand;
+    Task ScheduleAsync<TMessage>(
+        TMessage message,
+        DateTimeOffset visibleAt,
+        Guid? schedulingToken = null,
+        CancellationToken cancellationToken = default
+    )
+        where TMessage : ICommand;
+
+    Task<bool> CancelScheduledAsync(
+        Guid schedulingToken,
+        CancellationToken cancellationToken = default
+    );
 }

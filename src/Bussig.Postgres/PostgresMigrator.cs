@@ -1,28 +1,20 @@
+using Bussig.Constants;
+using Bussig.Postgres.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Npgsql;
 
 namespace Bussig.Postgres;
 
-public static class TransportConstants
-{
-    public const string DefaultSchemaName = "bussig";
-}
-
-public enum PostgresVersion
-{
-    Pg15 = 15,
-    Pg16 = 16,
-    Pg17 = 17,
-    Pg18 = 18,
-}
-
 public class TransportOptions
 {
     public string SchemaName { get; set; } = TransportConstants.DefaultSchemaName;
-    public PostgresVersion PostgresVersion { get; set; }
 }
 
-public class PostgresMigrator(NpgsqlDataSource npgsqlDataSource, ILogger<PostgresMigrator> logger)
+public class PostgresMigrator(
+    [FromKeyedServices(ServiceKeys.BussigNpgsql)] NpgsqlDataSource npgsqlDataSource,
+    ILogger<PostgresMigrator> logger
+)
 {
     public async Task CreateSchema(TransportOptions options, CancellationToken cancellationToken)
     {
@@ -123,6 +115,14 @@ public class PostgresMigrator(NpgsqlDataSource npgsqlDataSource, ILogger<Postgre
             CREATE INDEX IF NOT EXISTS message_delivery_idx_fetch ON "{0}".message_delivery (queue_id, priority ASC, visible_at, message_delivery_id);
             CREATE INDEX IF NOT EXISTS message_delivery_idx_message_id ON "{0}".message_delivery (message_id);
 
+            CREATE TABLE IF NOT EXISTS "{0}".distributed_locks (
+                    lock_id             TEXT            PRIMARY KEY NOT NULL
+                ,   expires_at          TIMESTAMPTZ     NOT NULL
+                ,   acquired_at         TIMESTAMPTZ     NOT NULL
+                ,   owner_token         UUID            NOT NULL
+                ,   extended_times      INTEGER         NOT NULL DEFAULT 0
+            );
+
             CREATE OR REPLACE FUNCTION "{0}".get_messages(
                     a_queue_name          TEXT
                 ,   a_lock_id             UUID
@@ -164,7 +164,7 @@ public class PostgresMigrator(NpgsqlDataSource npgsqlDataSource, ILogger<Postgre
                 RETURN QUERY
                 WITH msgs AS (
                     SELECT md.* FROM "{0}".message_delivery md
-                    WHERE queue_id = v_queue_id
+                    WHERE md.queue_id = v_queue_id
                     AND md.visible_at <= v_now
                     AND md.delivery_count < md.max_delivery_count
                     ORDER BY md.priority, md.visible_at, md.message_delivery_id
@@ -252,8 +252,8 @@ public class PostgresMigrator(NpgsqlDataSource npgsqlDataSource, ILogger<Postgre
                 ,   a_lock_id                   UUID
                 ,   a_queue_type                SMALLINT
                 ,   a_queue_name                TEXT
-                ,   a_headers                   JSON
-                ,   a_delay                     INTERVAL DEFAULT '0 seconds'
+                ,   a_headers                   JSONB
+                ,   a_delay                     INTERVAL DEFAULT INTERVAL '0 seconds'
             ) RETURNS BIGINT AS
             $$
             DECLARE
@@ -285,11 +285,11 @@ public class PostgresMigrator(NpgsqlDataSource npgsqlDataSource, ILogger<Postgre
                     a_message_delivery_id       BIGINT
                 ,   a_lock_id                   UUID
                 ,   a_queue_name                TEXT
-                ,   a_headers                   JSON
+                ,   a_headers                   JSONB
             ) RETURNS BIGINT AS
             $$
             BEGIN
-                RETURN "{0}".move_message(a_message_delivery_id, a_lock_id, 2, a_queue_name, a_headers);
+                RETURN "{0}".move_message(a_message_delivery_id, a_lock_id, 2::SMALLINT, a_queue_name, a_headers);
             END;
             $$ LANGUAGE plpgsql;
 
@@ -319,9 +319,9 @@ public class PostgresMigrator(NpgsqlDataSource npgsqlDataSource, ILogger<Postgre
             END;
             $$ LANGUAGE plpgsql;
 
-            CREATE OR REPLACE FUNCTION "{0}".delete_scheduled_message(
+            CREATE OR REPLACE FUNCTION "{0}".cancel_scheduled_message(
                     a_scheduling_token_id     UUID
-            ) RETURNS BIGINT AS
+            ) RETURNS UUID AS
             $$
             DECLARE
                 v_message_id    UUID;
@@ -373,7 +373,7 @@ public class PostgresMigrator(NpgsqlDataSource npgsqlDataSource, ILogger<Postgre
             CREATE OR REPLACE FUNCTION "{0}".send_message(
                     a_queue_name            TEXT
                 ,   a_message_id            UUID
-                ,   a_priority              INTEGER     DEFAULT NULL
+                ,   a_priority              SMALLINT    DEFAULT NULL
                 ,   a_body                  BYTEA       DEFAULT NULL
                 ,   a_delay                 INTERVAL    DEFAULT INTERVAL '0 seconds'
                 ,   a_headers               JSONB       DEFAULT NULL
@@ -405,66 +405,87 @@ public class PostgresMigrator(NpgsqlDataSource npgsqlDataSource, ILogger<Postgre
                 VALUES (a_message_id, a_body, a_headers, a_message_version, a_scheduling_token_id);
                 
                 INSERT INTO "{0}".message_delivery(message_id, queue_id, priority, visible_at, enqueued_at, delivery_count, max_delivery_count, expiration_time)
-                VALUES (a_message_id, v_queue_id, a_priority, v_visible_at, v_enqueued_at, 0, v_max_delivery_count, a_expiration_time);
+                VALUES (a_message_id, v_queue_id, COALESCE(a_priority, 16384), v_visible_at, v_enqueued_at, 0, v_max_delivery_count, a_expiration_time);
 
                 RETURN 1;
             END;
             $$ LANGUAGE plpgsql;
 
-            -- Management
-            CREATE OR REPLACE FUNCTION "{0}".requeue_deadletters(
-                    a_queue_name        TEXT
-                ,   a_count             BIGINT    DEFAULT NULL
-                ,   a_messages          BIGINT[]  DEFAULT NULL
-            ) RETURNS BIGINT[] AS
+            CREATE OR REPLACE FUNCTION "{0}".acquire_lock(
+                    a_lock_id               TEXT
+                ,   a_duration              INTERVAL
+                ,   a_owner_token           UUID
+            ) RETURNS BOOLEAN AS
             $$
             DECLARE
-                v_queue_id              BIGINT;
-                v_now                   TIMESTAMPTZ;
-                v_message_delivery_id   BIGINT;
+                    v_now           TIMESTAMPTZ;
+                    v_expires_at    TIMESTAMPTZ;
+                    v_upserted      INTEGER;
             BEGIN
-                SELECT q.queue_id INTO v_queue_id FROM "{0}".queues q WHERE q.name = a_queue_name AND q.type = 2;
-                IF v_queue_id IS NULL THEN
-                    RAISE EXCEPTION 'Queue does not exist: %s', a_queue_name;
+                IF a_duration < INTERVAL '1 second' THEN
+                    RAISE EXCEPTION 'Duration must be greater than 0 seconds';
                 END IF;
                 
                 v_now := (NOW() AT TIME ZONE 'utc');
+                v_expires_at := v_now + a_duration;
                 
-                IF a_count IS NOT NULL AND a_count > 0 THEN
-                    WITH message_deliveries AS (
-                        SELECT * FROM "{0}".message_delivery md
-                        WHERE md.queue_id = v_queue_id
-                        ORDER BY md.visible_at, md.message_delivery_id
-                        LIMIT a_count
-                        FOR UPDATE OF md SKIP LOCKED
-                    )
-                    UPDATE "{0}".message_delivery md
-                    SET delivery_count = 0, message_delivery_headers = NULL, visible_at = v_now, enqueued_at = v_now
-                    FROM message_deliveries mdd
-                    WHERE md.message_delivery_id = mdd.message_delivery_id
-                    RETURNING md.message_delivery_id
-                    INTO v_message_delivery_id;
-                    
-                    RETURN v_message_delivery_id;
-                ELSIF a_messages IS NOT NULL AND ARRAY_LENGTH(a_messages, 1) > 0 THEN
-                    UPDATE "{0}".message_delivery md
-                    SET delivery_count = 0, message_delivery_headers = NULL, visible_at = v_now, enqueued_at = v_now
-                    WHERE md.queue_id = v_queue_id AND md.message_delivery_id = ANY(a_messages)
-                    RETURNING md.message_delivery_id
-                    INTO v_message_delivery_id;
-                    
-                    RETURN v_message_delivery_id;
-                ELSE
-                    UPDATE "{0}".message_delivery md
-                    SET delivery_count = 0, message_delivery_headers = NULL, visible_at = v_now, enqueued_at = v_now
-                    WHERE md.queue_id = v_queue_id
-                    RETURNING md.message_delivery_id
-                    INTO v_message_delivery_id;
-                    
-                    RETURN v_message_delivery_id;
-                END IF;
+                INSERT INTO "{0}".distributed_locks AS dl (lock_id, expires_at, acquired_at, owner_token)
+                VALUES (a_lock_id, v_expires_at, v_now, a_owner_token)
+                ON CONFLICT (lock_id) DO UPDATE SET
+                    expires_at = EXCLUDED.expires_at,
+                    acquired_at = EXCLUDED.acquired_at,
+                    owner_token = EXCLUDED.owner_token,
+                    extended_times = 0
+                WHERE dl.expires_at <= v_now;
+                
+                GET DIAGNOSTICS v_upserted = ROW_COUNT;
+                RETURN v_upserted = 1;
             END;
             $$ LANGUAGE plpgsql;
+
+            CREATE OR REPLACE FUNCTION "{0}".release_lock(
+                    a_lock_id           TEXT
+                ,   a_owner_token       UUID
+            ) RETURNS BOOLEAN AS
+            $$
+            DECLARE
+                v_deleted   INTEGER;
+            BEGIN
+                DELETE FROM "{0}".distributed_locks
+                WHERE lock_id = a_lock_id AND owner_token = a_owner_token;
+                
+                GET DIAGNOSTICS v_deleted = ROW_COUNT;
+                RETURN v_deleted = 1;
+            END;
+            $$ LANGUAGE plpgsql;
+
+            CREATE OR REPLACE FUNCTION "{0}".renew_lock(
+                    a_lock_id           TEXT
+                ,   a_owner_token       UUID
+                ,   a_duration          INTERVAL
+            ) RETURNS BOOLEAN AS
+            $$
+            DECLARE
+                v_now           TIMESTAMPTZ := NOW() AT TIME ZONE 'utc';
+                v_expires_at    TIMESTAMPTZ;
+                v_updated       INTEGER;
+            BEGIN
+                IF a_duration < INTERVAL '1 second' THEN
+                    RAISE EXCEPTION 'Duration must be greater than 0 seconds';
+                END IF;
+                
+                v_expires_at := v_now + a_duration;
+                
+                UPDATE "{0}".distributed_locks dl
+                SET expires_at = v_expires_at, extended_times = dl.extended_times + 1
+                WHERE lock_id = a_lock_id AND owner_token = a_owner_token AND dl.expires_at > v_now;
+                
+                GET DIAGNOSTICS v_updated = ROW_COUNT;
+                RETURN v_updated = 1;
+            END;
+            $$ LANGUAGE plpgsql;
+
+            -- Management
 
             CREATE OR REPLACE FUNCTION "{0}".peek_deadletters(
                     a_queue_name        TEXT

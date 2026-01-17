@@ -3,7 +3,7 @@ namespace Bussig.Postgres;
 public class PsqlStatements
 {
     public const string SendMessage =
-        """SELECT * FROM "{0}".send_message($1, $2, $3, $4, $5, $6, $8, $9);""";
+        """SELECT * FROM "{0}".send_message($1, $2, $3, $4, $5, $6, $7, $8, $9);""";
 
     public const string CreateQueue = """SELECT * FROM "{0}".create_queue($1, $2);""";
 
@@ -16,6 +16,10 @@ public class PsqlStatements
     public const string RenewMessageLock =
         """SELECT * FROM "{0}".renew_message_lock($1, $2, $3);""";
 
-    public const string DeleteScheduledMessage =
-        """SELECT * FROM "{0}".delete_scheduled_message($1);""";
+    public const string CancelScheduledMessage =
+        """SELECT * FROM "{0}".cancel_scheduled_message($1);""";
+
+    public const string AcquireLock = """SELECT * FROM "{0}".acquire_lock($1, $2, $3)""";
+    public const string ReleaseLock = """SELECT * FROM "{0}".acquire_lock($1, $2)""";
+    public const string RenewLock = """SELECT * FROM "{0}".acquire_lock($1, $2, $3)""";
 }
