@@ -1,0 +1,17 @@
+<Solution>
+  <Folder Name="/Solution Items/">
+    <File Path=".config/dotnet-tools.json" />
+    <File Path=".gitattributes" />
+    <File Path=".gitignore" />
+    <File Path="Directory.Build.props" />
+    <File Path="LICENSE" />
+    <File Path="README.md" />
+  </Folder>
+  <Folder Name="/Tests/">
+    <Project Path="src/Bussig.Postgres.Tests.Integration/Bussig.Postgres.Tests.Integration.csproj" />
+    <Project Path="src/Bussig.Tests.Unit/Bussig.Tests.Unit.csproj" />
+  </Folder>
+  <Project Path="src/Bussig.Abstractions/Bussig.Abstractions.csproj" />
+  <Project Path="src/Bussig.Postgres/Bussig.Postgres.csproj" />
+  <Project Path="src/Bussig/Bussig.csproj" />
+</Solution>
