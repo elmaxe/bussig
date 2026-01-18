@@ -19,11 +19,20 @@ public sealed class Bus : IBus
         _serializer = serializer;
     }
 
-    // TODO: Message send options for priority, version, expiration, headers, etc
     public Task SendAsync<TMessage>(TMessage message, CancellationToken cancellationToken = default)
         where TMessage : ICommand
     {
-        return SendAsyncInternal(message, null, null, cancellationToken);
+        return SendAsync(message, new MessageSendOptions(), cancellationToken);
+    }
+
+    public Task SendAsync<TMessage>(
+        TMessage message,
+        MessageSendOptions options,
+        CancellationToken cancellationToken = default
+    )
+        where TMessage : ICommand
+    {
+        return SendAsyncInternal(message, options, cancellationToken);
     }
 
     public Task ScheduleAsync<TMessage>(
@@ -34,7 +43,21 @@ public sealed class Bus : IBus
     )
         where TMessage : ICommand
     {
-        return SendAsyncInternal(message, delay, schedulingToken, cancellationToken);
+        return ScheduleAsync(
+            message,
+            new MessageSendOptions { Delay = delay, SchedulingToken = schedulingToken },
+            cancellationToken
+        );
+    }
+
+    public Task ScheduleAsync<TMessage>(
+        TMessage message,
+        MessageSendOptions options,
+        CancellationToken cancellationToken = default
+    )
+        where TMessage : ICommand
+    {
+        return SendAsyncInternal(message, options, cancellationToken);
     }
 
     public Task ScheduleAsync<TMessage>(
@@ -49,10 +72,14 @@ public sealed class Bus : IBus
         {
             throw new ArgumentException($"{nameof(visibleAt)} should be in the future");
         }
+
         return SendAsyncInternal(
             message,
-            visibleAt - DateTimeOffset.UtcNow,
-            schedulingToken,
+            new MessageSendOptions
+            {
+                Delay = visibleAt - DateTimeOffset.UtcNow,
+                SchedulingToken = schedulingToken,
+            },
             cancellationToken
         );
     }
@@ -67,8 +94,7 @@ public sealed class Bus : IBus
 
     private async Task SendAsyncInternal<TMessage>(
         TMessage message,
-        TimeSpan? delay,
-        Guid? schedulingToken,
+        MessageSendOptions options,
         CancellationToken cancellationToken
     )
         where TMessage : ICommand
@@ -78,14 +104,16 @@ public sealed class Bus : IBus
 
         var body = _serializer.SerializeToUtf8Bytes(message);
         var outgoing = new OutgoingMessage(
-            FastGuid.NewPostgreSqlGuid(),
+            options.MessageId ?? FastGuid.NewPostgreSqlGuid(),
             queueName,
             body,
             headersJson
         )
         {
-            Delay = delay,
-            SchedulingTokenId = schedulingToken,
+            Delay = options.Delay,
+            SchedulingTokenId = options.SchedulingToken,
+            MessageVersion = options.MessageVersion,
+            Priority = options.Priority.HasValue ? (short)options.Priority : null,
         };
         await _messageSender.SendAsync(outgoing, cancellationToken);
     }
