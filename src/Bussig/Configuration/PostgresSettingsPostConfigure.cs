@@ -1,7 +1,6 @@
-using Bussig.Configuration;
 using Microsoft.Extensions.Options;
 
-namespace Bussig;
+namespace Bussig.Configuration;
 
 internal sealed class PostgresSettingsPostConfigure : IPostConfigureOptions<PostgresSettings>
 {

@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text;
+using Bussig.Abstractions;
 using Bussig.Configuration;
 using Bussig.Constants;
 using Microsoft.Extensions.DependencyInjection;
@@ -13,7 +14,7 @@ public class PostgresMigrator(
     [FromKeyedServices(ServiceKeys.BussigNpgsql)] NpgsqlDataSource npgsqlDataSource,
     IOptions<PostgresSettings> settings,
     ILogger<PostgresMigrator> logger
-)
+) : IPostgresMigrator
 {
     private readonly PostgresSettings _settings = settings.Value;
 
@@ -110,7 +111,8 @@ public class PostgresMigrator(
         await using var connection = await npgsqlDataSource.OpenConnectionAsync(cancellationToken);
 
         await using var command = new NpgsqlCommand(
-            string.Format(CultureInfo.InvariantCulture, DropDatabaseSqlCommand, _settings.Database)
+            string.Format(CultureInfo.InvariantCulture, DropDatabaseSqlCommand, _settings.Database),
+            connection
         );
 
         await command.ExecuteScalarAsync(cancellationToken);

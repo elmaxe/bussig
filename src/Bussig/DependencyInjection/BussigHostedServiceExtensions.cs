@@ -59,7 +59,6 @@ public static class BussigHostedServiceExtensions
         services.AddSingleton<IMessageSerializer, SystemTextJsonMessageSerializer>();
         services.AddSingleton<PostgresQueueCreator>();
         services.AddSingleton<IOutgoingMessageSender, PostgresOutgoingMessageSender>();
-        services.AddSingleton<PostgresMigrator>();
         services.AddSingleton<IBus, Bus>();
     }
 }

@@ -1,3 +1,4 @@
+using Bussig.Abstractions;
 using Bussig.Abstractions.Host;
 using Bussig.Hosting;
 using Microsoft.Extensions.DependencyInjection;
@@ -24,7 +25,7 @@ public static class MigrationConfigurationExtensions
             });
 
         services.AddHostedService<MigrationHostedService>();
-        services.AddScoped<PostgresMigrator>();
+        services.AddScoped<IPostgresMigrator, PostgresMigrator>();
 
         return services;
     }

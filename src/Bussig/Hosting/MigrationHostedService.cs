@@ -1,3 +1,4 @@
+using Bussig.Abstractions;
 using Bussig.Abstractions.Host;
 using Bussig.Configuration;
 using Microsoft.Extensions.Hosting;
@@ -9,7 +10,7 @@ namespace Bussig.Hosting;
 public sealed class MigrationHostedService(
     IOptions<MigrationOptions> options,
     IOptions<PostgresSettings> transportOptions,
-    PostgresMigrator migrator,
+    IPostgresMigrator migrator,
     ILogger<MigrationHostedService> logger
 ) : IHostedService
 {
