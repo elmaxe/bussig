@@ -38,10 +38,30 @@ public sealed class ConsumerOptions
     public TimeSpan LockRenewalInterval { get; set; } = TimeSpan.FromMinutes(2);
 
     /// <summary>
-    /// Delay before retrying a failed message.
+    /// Base delay before retrying a failed message.
+    /// For Fixed strategy, this is the exact delay.
+    /// For Exponential strategy, this is the initial delay that grows with each retry.
     /// Default: 30 seconds
     /// </summary>
     public TimeSpan RetryDelay { get; set; } = TimeSpan.FromSeconds(30);
+
+    /// <summary>
+    /// Strategy for calculating retry delays.
+    /// Default: Fixed
+    /// </summary>
+    public RetryStrategy RetryStrategy { get; set; } = RetryStrategy.Fixed;
+
+    /// <summary>
+    /// Maximum retry delay when using exponential backoff.
+    /// Default: 5 minutes
+    /// </summary>
+    public TimeSpan MaxRetryDelay { get; set; } = TimeSpan.FromMinutes(5);
+
+    /// <summary>
+    /// Custom retry delay calculator. Used when RetryStrategy is Custom.
+    /// Receives full retry context including message metadata and exception.
+    /// </summary>
+    public Func<RetryContext, TimeSpan>? CustomRetryDelayCalculator { get; set; }
 
     /// <summary>
     /// Whether to automatically renew message locks during processing.

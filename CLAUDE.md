@@ -16,15 +16,15 @@ dotnet build
 dotnet test
 
 # Run specific test project
-dotnet test src/Bussig.Tests.Unit
-dotnet test src/Bussig.Tests.Integration
+dotnet run --project src/Bussig.Tests.Unit
+dotnet run --project src/Bussig.Tests.Integration
 
 # Run a single test (TUnit uses --filter)
 dotnet test --filter "FullyQualifiedName~MessageUrnTests"
 
 # Format code (CSharpier)
 dotnet tool restore
-dotnet csharpier .
+dotnet csharpier format .
 
 # Check formatting without modifying
 dotnet csharpier --check .

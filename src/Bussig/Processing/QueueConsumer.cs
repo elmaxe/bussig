@@ -427,7 +427,12 @@ public sealed class QueueConsumer : IAsyncDisposable
             }
             else
             {
-                await AbandonBatchAsync(incomingMessages, _options.RetryDelay);
+                // Use the message with the highest delivery count as representative for retry calculation
+                var representativeMessage = incomingMessages.MaxBy(m => m.DeliveryCount)!;
+                await AbandonBatchAsync(
+                    incomingMessages,
+                    CalculateRetryDelay(representativeMessage)
+                );
             }
         }
         finally
@@ -684,7 +689,7 @@ public sealed class QueueConsumer : IAsyncDisposable
                     incomingMessage.MessageDeliveryId,
                     incomingMessage.LockId,
                     errorHeaders,
-                    _options.RetryDelay,
+                    CalculateRetryDelay(incomingMessage, ex),
                     CancellationToken.None
                 );
             }
@@ -856,6 +861,37 @@ public sealed class QueueConsumer : IAsyncDisposable
         headers["error-timestamp"] = DateTimeOffset.UtcNow.ToString("O");
 
         return JsonSerializer.Serialize(headers);
+    }
+
+    private TimeSpan CalculateRetryDelay(IncomingMessage message, Exception? exception = null)
+    {
+        return _options.RetryStrategy switch
+        {
+            RetryStrategy.Immediate => TimeSpan.Zero,
+            RetryStrategy.Fixed => _options.RetryDelay,
+            RetryStrategy.Exponential => CalculateExponentialDelay(message.DeliveryCount),
+            RetryStrategy.Custom => _options.CustomRetryDelayCalculator?.Invoke(
+                new RetryContext
+                {
+                    DeliveryCount = message.DeliveryCount,
+                    MaxDeliveryCount = message.MaxDeliveryCount,
+                    EnqueuedAt = message.EnqueuedAt,
+                    LastDeliveredAt = message.LastDeliveredAt,
+                    ExpirationTime = message.ExpirationTime,
+                    Exception = exception,
+                    BaseDelay = _options.RetryDelay,
+                }
+            ) ?? _options.RetryDelay,
+            _ => _options.RetryDelay,
+        };
+    }
+
+    private TimeSpan CalculateExponentialDelay(int deliveryCount)
+    {
+        // 2^(deliveryCount-1) * baseDelay, capped at MaxRetryDelay
+        var multiplier = Math.Pow(2, deliveryCount - 1);
+        var delay = TimeSpan.FromTicks((long)(_options.RetryDelay.Ticks * multiplier));
+        return delay > _options.MaxRetryDelay ? _options.MaxRetryDelay : delay;
     }
 
     public async ValueTask DisposeAsync()
