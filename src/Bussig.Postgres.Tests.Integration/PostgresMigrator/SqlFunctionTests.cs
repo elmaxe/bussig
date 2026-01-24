@@ -1,6 +1,6 @@
 using System.Globalization;
 using System.Text.Json;
-using Bussig.Abstractions;
+using Bussig.Postgres.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;

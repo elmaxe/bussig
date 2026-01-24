@@ -1,7 +1,7 @@
 using System.Globalization;
 using System.Text;
-using Bussig.Abstractions;
 using Bussig.Constants;
+using Bussig.Postgres.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -35,16 +35,23 @@ public class PostgresMigrator(
 
     public async Task CreateDatabase(CancellationToken cancellationToken)
     {
-        await using var connection = await npgsqlDataSource.OpenConnectionAsync(cancellationToken);
+        var connectionString = new NpgsqlConnectionStringBuilder(_settings.ConnectionString)
+        {
+            Database = "postgres",
+        }.ToString();
+
+        await using var connection = new NpgsqlConnection(connectionString);
+        await connection.OpenAsync(cancellationToken);
 
         await using var checkCommand = new NpgsqlCommand(
             string.Format(
                 CultureInfo.InvariantCulture,
                 DatabaseExistsSqlCommand,
                 _settings.Database
-            )
+            ),
+            connection
         );
-        var result = (int?)await checkCommand.ExecuteScalarAsync(cancellationToken);
+        var result = (long?)await checkCommand.ExecuteScalarAsync(cancellationToken);
         if (result is 1)
         {
             logger.LogInformation("Database {Database} already exists", _settings.Database);
@@ -59,7 +66,7 @@ public class PostgresMigrator(
                 ),
                 connection
             );
-            await createCommand.ExecuteScalarAsync(cancellationToken);
+            await createCommand.ExecuteNonQueryAsync(cancellationToken);
 
             logger.LogDebug("Database {Database} created", _settings.Database);
         }
@@ -113,10 +120,8 @@ public class PostgresMigrator(
 
     private static string LoadSqlResource()
     {
-        var fileStream = File.OpenRead(
-            Path.Join(Directory.GetCurrentDirectory(), "infrastructure.sql")
-        );
-        using var reader = new StreamReader(fileStream);
-        return reader.ReadToEnd();
+        var assemblyLocation = Path.GetDirectoryName(typeof(PostgresMigrator).Assembly.Location)!;
+        var filePath = Path.Join(assemblyLocation, "infrastructure.sql");
+        return File.ReadAllText(filePath);
     }
 }

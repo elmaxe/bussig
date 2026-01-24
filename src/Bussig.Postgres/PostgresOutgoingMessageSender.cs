@@ -1,6 +1,7 @@
 using System.Globalization;
 using Bussig.Abstractions;
 using Bussig.Constants;
+using Bussig.Postgres.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Npgsql;

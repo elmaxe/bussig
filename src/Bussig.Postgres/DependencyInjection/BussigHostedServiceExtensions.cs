@@ -35,44 +35,25 @@ public static class BussigHostedServiceExtensions
         BussigRegistrationConfigurator configurator
     )
     {
-        // if (services.All(x => x.ServiceType != typeof(IOptions<PostgresSettings>)))
-        // {
-        //     throw new InvalidOperationException($"No {nameof(PostgresSettings)} registered.");
-        // }
         services.AddSingleton<IBussigRegistrationConfigurator>(configurator);
+
+        // Post-configure to extract values from connection string
+        services.ConfigureOptions<PostgresSettingsPostConfigure>();
 
         services.AddKeyedSingleton<NpgsqlDataSource>(
             ServiceKeys.BussigNpgsql,
             (provider, _) =>
             {
                 var settings = provider.GetRequiredService<IOptions<PostgresSettings>>().Value;
-                var builder = new NpgsqlConnectionStringBuilder(settings.ConnectionString);
-
-                if (!string.IsNullOrWhiteSpace(settings.Database))
+                var builder = new NpgsqlConnectionStringBuilder(settings.ConnectionString)
                 {
-                    builder.Database = settings.Database;
-                }
-
-                builder.SearchPath = !string.IsNullOrWhiteSpace(settings.Schema)
-                    ? settings.Schema
-                    : TransportConstants.DefaultSchemaName;
+                    Database = settings.Database,
+                    SearchPath = settings.Schema,
+                };
 
                 return NpgsqlDataSource.Create(builder.ToString());
             }
         );
-        // TODO FIX THIS
-        services.AddSingleton<TransportOptions>(provider =>
-        {
-            var settings = provider.GetRequiredService<IOptions<PostgresSettings>>().Value;
-            var builder = new NpgsqlConnectionStringBuilder(settings.ConnectionString);
-            builder.SearchPath = settings.Schema ?? TransportConstants.DefaultSchemaName;
-
-            return new TransportOptions
-            {
-                Database = builder.Database!,
-                Schema = builder.SearchPath,
-            };
-        });
 
         services.AddSingleton<IPostgresTransactionAccessor, PostgresTransactionAccessor>();
         services.AddSingleton<IMessageSerializer, SystemTextJsonMessageSerializer>();

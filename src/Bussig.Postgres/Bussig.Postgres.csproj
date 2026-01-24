@@ -16,7 +16,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <InternalsVisibleTo Include="Bussig.Postgres.Tests.Unit" />
+    <InternalsVisibleTo Include="Bussig.Tests.Unit" />
     <InternalsVisibleTo Include="Bussig.Postgres.Tests.Integration" />
   </ItemGroup>
 
