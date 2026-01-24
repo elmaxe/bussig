@@ -2,6 +2,7 @@ using System.Reflection;
 using System.Text.Json;
 using Bussig.Abstractions;
 using Bussig.Abstractions.Messages;
+using Bussig.Abstractions.Options;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Npgsql;
@@ -17,7 +18,7 @@ public sealed class QueueConsumer : IAsyncDisposable
     private readonly Type? _responseMessageType;
     private readonly bool _isBatchProcessor;
     private readonly Type? _batchMessageType;
-    private readonly ConsumerOptions _options;
+    private readonly ProcessorOptions _options;
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly PostgresMessageReceiver _receiver;
     private readonly IMessageSerializer _serializer;
@@ -36,7 +37,7 @@ public sealed class QueueConsumer : IAsyncDisposable
         Type? responseMessageType,
         bool isBatchProcessor,
         Type? batchMessageType,
-        ConsumerOptions options,
+        ProcessorOptions options,
         IServiceScopeFactory scopeFactory,
         PostgresMessageReceiver receiver,
         IMessageSerializer serializer,
@@ -60,7 +61,10 @@ public sealed class QueueConsumer : IAsyncDisposable
         _transactionAccessor = transactionAccessor;
         _bus = bus;
         _logger = logger;
-        _concurrencySemaphore = new SemaphoreSlim(options.MaxConcurrency, options.MaxConcurrency);
+        _concurrencySemaphore = new SemaphoreSlim(
+            options.Polling.MaxConcurrency,
+            options.Polling.MaxConcurrency
+        );
     }
 
     public void Start()
@@ -105,8 +109,8 @@ public sealed class QueueConsumer : IAsyncDisposable
                 processingTasks.RemoveAll(t => t.IsCompleted);
 
                 // Calculate how many messages we can fetch
-                var availableSlots = _options.MaxConcurrency - processingTasks.Count;
-                var fetchCount = Math.Min(availableSlots, _options.PrefetchCount);
+                var availableSlots = _options.Polling.MaxConcurrency - processingTasks.Count;
+                var fetchCount = Math.Min(availableSlots, _options.Polling.PrefetchCount);
 
                 if (fetchCount <= 0)
                 {
@@ -120,14 +124,14 @@ public sealed class QueueConsumer : IAsyncDisposable
                 var messages = await _receiver.ReceiveAsync(
                     _queueName,
                     lockId,
-                    _options.LockDuration,
+                    _options.Lock.Duration,
                     fetchCount,
                     stoppingToken
                 );
 
                 if (messages.Count == 0)
                 {
-                    await Task.Delay(_options.PollInterval, stoppingToken);
+                    await Task.Delay(_options.Polling.Interval, stoppingToken);
                     continue;
                 }
 
@@ -150,7 +154,7 @@ public sealed class QueueConsumer : IAsyncDisposable
                     "Error polling queue {QueueName}, will retry after interval",
                     _queueName
                 );
-                await Task.Delay(_options.PollInterval, stoppingToken);
+                await Task.Delay(_options.Polling.Interval, stoppingToken);
             }
         }
 
@@ -207,7 +211,7 @@ public sealed class QueueConsumer : IAsyncDisposable
                     "Error in batch polling for queue {QueueName}, will retry after interval",
                     _queueName
                 );
-                await Task.Delay(_options.PollInterval, stoppingToken);
+                await Task.Delay(_options.Polling.Interval, stoppingToken);
             }
         }
 
@@ -221,16 +225,16 @@ public sealed class QueueConsumer : IAsyncDisposable
         var lockId = FastGuid.NewPostgreSqlGuid();
 
         while (
-            messages.Count < _options.BatchMessageLimit && !stoppingToken.IsCancellationRequested
+            messages.Count < _options.Batch.MessageLimit && !stoppingToken.IsCancellationRequested
         )
         {
-            var remaining = (int)(_options.BatchMessageLimit - messages.Count);
-            var fetchCount = Math.Min(remaining, _options.PrefetchCount);
+            var remaining = (int)(_options.Batch.MessageLimit - messages.Count);
+            var fetchCount = Math.Min(remaining, _options.Polling.PrefetchCount);
 
             var fetched = await _receiver.ReceiveAsync(
                 _queueName,
                 lockId,
-                _options.LockDuration,
+                _options.Lock.Duration,
                 fetchCount,
                 stoppingToken
             );
@@ -238,7 +242,7 @@ public sealed class QueueConsumer : IAsyncDisposable
             messages.AddRange(fetched);
 
             // Check if time limit exceeded and we have at least one message
-            if (DateTime.UtcNow - batchStartTime >= _options.BatchTimeLimit && messages.Count > 0)
+            if (DateTime.UtcNow - batchStartTime >= _options.Batch.TimeLimit && messages.Count > 0)
             {
                 break;
             }
@@ -252,7 +256,7 @@ public sealed class QueueConsumer : IAsyncDisposable
                 }
 
                 // No messages at all, wait before next poll
-                await Task.Delay(_options.PollInterval, stoppingToken);
+                await Task.Delay(_options.Polling.Interval, stoppingToken);
             }
         }
 
@@ -371,7 +375,7 @@ public sealed class QueueConsumer : IAsyncDisposable
             var processor = scope.ServiceProvider.GetRequiredService(_processorType);
 
             // Invoke ProcessAsync
-            var processMethod = _processorType.GetMethod(nameof(IProcessor<object>.ProcessAsync));
+            var processMethod = _processorType.GetMethod(nameof(IProcessor<>.ProcessAsync));
             if (processMethod is null)
             {
                 throw new InvalidOperationException(
@@ -443,7 +447,7 @@ public sealed class QueueConsumer : IAsyncDisposable
     }
 
     private static MessageBatch<TMessage> CreateBatch<TMessage>(List<object> contexts)
-        where TMessage : class
+        where TMessage : class, IMessage
     {
         var typedContexts = contexts.Cast<MessageProcessorContext<TMessage>>();
         return new MessageBatch<TMessage>(typedContexts);
@@ -590,7 +594,7 @@ public sealed class QueueConsumer : IAsyncDisposable
             }
 
             // Invoke ProcessAsync using reflection
-            var processMethod = _processorType.GetMethod(nameof(IProcessor<object>.ProcessAsync));
+            var processMethod = _processorType.GetMethod(nameof(IProcessor<>.ProcessAsync));
             if (processMethod is null)
             {
                 throw new InvalidOperationException(
@@ -780,7 +784,7 @@ public sealed class QueueConsumer : IAsyncDisposable
         CancellationToken cancellationToken
     )
     {
-        if (!_options.EnableLockRenewal)
+        if (!_options.Lock.EnableRenewal)
         {
             return;
         }
@@ -791,17 +795,17 @@ public sealed class QueueConsumer : IAsyncDisposable
         {
             while (!cancellationToken.IsCancellationRequested)
             {
-                await Task.Delay(_options.LockRenewalInterval, cancellationToken);
+                await Task.Delay(_options.Lock.RenewalInterval, cancellationToken);
 
                 // Check max renewal count
                 if (
-                    _options.MaxLockRenewalCount.HasValue
-                    && renewalCount >= _options.MaxLockRenewalCount.Value
+                    _options.Lock.MaxRenewalCount.HasValue
+                    && renewalCount >= _options.Lock.MaxRenewalCount.Value
                 )
                 {
                     _logger.LogWarning(
                         "Lock renewal limit ({MaxCount}) reached for message delivery {MessageDeliveryId}",
-                        _options.MaxLockRenewalCount.Value,
+                        _options.Lock.MaxRenewalCount.Value,
                         messageDeliveryId
                     );
                     break;
@@ -810,7 +814,7 @@ public sealed class QueueConsumer : IAsyncDisposable
                 var renewed = await _receiver.RenewLockAsync(
                     messageDeliveryId,
                     lockId,
-                    _options.LockDuration,
+                    _options.Lock.Duration,
                     cancellationToken
                 );
 
@@ -865,12 +869,12 @@ public sealed class QueueConsumer : IAsyncDisposable
 
     private TimeSpan CalculateRetryDelay(IncomingMessage message, Exception? exception = null)
     {
-        return _options.RetryStrategy switch
+        return _options.Retry.Strategy switch
         {
             RetryStrategy.Immediate => TimeSpan.Zero,
-            RetryStrategy.Fixed => _options.RetryDelay,
+            RetryStrategy.Fixed => _options.Retry.Delay,
             RetryStrategy.Exponential => CalculateExponentialDelay(message.DeliveryCount),
-            RetryStrategy.Custom => _options.CustomRetryDelayCalculator?.Invoke(
+            RetryStrategy.Custom => _options.Retry.CustomDelayCalculator?.Invoke(
                 new RetryContext
                 {
                     DeliveryCount = message.DeliveryCount,
@@ -879,10 +883,10 @@ public sealed class QueueConsumer : IAsyncDisposable
                     LastDeliveredAt = message.LastDeliveredAt,
                     ExpirationTime = message.ExpirationTime,
                     Exception = exception,
-                    BaseDelay = _options.RetryDelay,
+                    BaseDelay = _options.Retry.Delay,
                 }
-            ) ?? _options.RetryDelay,
-            _ => _options.RetryDelay,
+            ) ?? _options.Retry.Delay,
+            _ => _options.Retry.Delay,
         };
     }
 
@@ -890,8 +894,8 @@ public sealed class QueueConsumer : IAsyncDisposable
     {
         // 2^(deliveryCount-1) * baseDelay, capped at MaxRetryDelay
         var multiplier = Math.Pow(2, deliveryCount - 1);
-        var delay = TimeSpan.FromTicks((long)(_options.RetryDelay.Ticks * multiplier));
-        return delay > _options.MaxRetryDelay ? _options.MaxRetryDelay : delay;
+        var delay = TimeSpan.FromTicks((long)(_options.Retry.Delay.Ticks * multiplier));
+        return delay > _options.Retry.MaxDelay ? _options.Retry.MaxDelay : delay;
     }
 
     public async ValueTask DisposeAsync()

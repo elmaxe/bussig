@@ -116,13 +116,13 @@ public class BussigRegistrationConfiguratorTests
         // Act
         configurator.AddProcessorsFromAssembly(
             typeof(TestProcessor).Assembly,
-            options => options.MaxConcurrency = 10
+            options => options.Polling.MaxConcurrency = 10
         );
 
         // Assert
         foreach (var registration in configurator.ProcessorRegistrations)
         {
-            await Assert.That(registration.Options.MaxConcurrency).IsEqualTo(10);
+            await Assert.That(registration.Options.Polling.MaxConcurrency).IsEqualTo(10);
         }
     }
 

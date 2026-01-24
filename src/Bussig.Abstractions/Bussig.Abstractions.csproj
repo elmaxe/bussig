@@ -1,3 +1,6 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup></PropertyGroup>
+  <ItemGroup>
+    <Folder Include="Processors\Options\" />
+  </ItemGroup>
 </Project>

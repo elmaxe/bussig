@@ -1,4 +1,6 @@
 using System.Reflection;
+using Bussig.Abstractions.Messages;
+using Bussig.Abstractions.Options;
 
 namespace Bussig.Abstractions;
 
@@ -10,32 +12,32 @@ public interface IBussigRegistrationConfigurator
     void AddMessage(Type message, Action<QueueOptions>? configure = null);
     bool TryGetQueueOptions(Type message, out QueueOptions options);
 
-    void AddProcessor<TMessage, TProcessor>(Action<ConsumerOptions>? configure = null)
-        where TMessage : class
+    void AddProcessor<TMessage, TProcessor>(Action<ProcessorOptions>? configure = null)
+        where TMessage : class, IMessage
         where TProcessor : class, IProcessor<TMessage>;
 
     void AddProcessor(
         Type messageType,
         Type processorType,
-        Action<ConsumerOptions>? configure = null
+        Action<ProcessorOptions>? configure = null
     );
 
     /// <summary>
     /// Registers a processor, inferring the message type from the processor's IProcessor interface.
     /// </summary>
-    void AddProcessor<TProcessor>(Action<ConsumerOptions>? configure = null)
+    void AddProcessor<TProcessor>(Action<ProcessorOptions>? configure = null)
         where TProcessor : class, IProcessor;
 
     /// <summary>
     /// Registers a processor, inferring the message type from the processor's IProcessor interface.
     /// </summary>
-    void AddProcessor(Type processorType, Action<ConsumerOptions>? configure = null);
+    void AddProcessor(Type processorType, Action<ProcessorOptions>? configure = null);
 
     /// <summary>
     /// Scans an assembly for all IProcessor implementations and registers them.
     /// </summary>
     void AddProcessorsFromAssembly(
         Assembly assembly,
-        Action<ConsumerOptions>? defaultConfigure = null
+        Action<ProcessorOptions>? defaultConfigure = null
     );
 }

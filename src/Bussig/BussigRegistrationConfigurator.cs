@@ -1,5 +1,7 @@
 using System.Reflection;
 using Bussig.Abstractions;
+using Bussig.Abstractions.Messages;
+using Bussig.Abstractions.Options;
 using Bussig.Processing;
 
 namespace Bussig;
@@ -30,8 +32,8 @@ public class BussigRegistrationConfigurator : IBussigRegistrationConfigurator
         return _queueOptions.TryGetValue(message, out options!);
     }
 
-    public void AddProcessor<TMessage, TProcessor>(Action<ConsumerOptions>? configure = null)
-        where TMessage : class
+    public void AddProcessor<TMessage, TProcessor>(Action<ProcessorOptions>? configure = null)
+        where TMessage : class, IMessage
         where TProcessor : class, IProcessor<TMessage>
     {
         AddProcessor(typeof(TMessage), typeof(TProcessor), configure);
@@ -40,7 +42,7 @@ public class BussigRegistrationConfigurator : IBussigRegistrationConfigurator
     public void AddProcessor(
         Type messageType,
         Type processorType,
-        Action<ConsumerOptions>? configure = null
+        Action<ProcessorOptions>? configure = null
     )
     {
         // Get processor interface info including response type and batch info
@@ -71,7 +73,7 @@ public class BussigRegistrationConfigurator : IBussigRegistrationConfigurator
         // Also register the message type for queue creation
         AddMessage(queueMessageType);
 
-        var options = new ConsumerOptions();
+        var options = new ProcessorOptions();
         configure?.Invoke(options);
 
         var queueName = MessageUrn.ForType(queueMessageType).ToString();
@@ -90,13 +92,13 @@ public class BussigRegistrationConfigurator : IBussigRegistrationConfigurator
         );
     }
 
-    public void AddProcessor<TProcessor>(Action<ConsumerOptions>? configure = null)
+    public void AddProcessor<TProcessor>(Action<ProcessorOptions>? configure = null)
         where TProcessor : class, IProcessor
     {
         AddProcessor(typeof(TProcessor), configure);
     }
 
-    public void AddProcessor(Type processorType, Action<ConsumerOptions>? configure = null)
+    public void AddProcessor(Type processorType, Action<ProcessorOptions>? configure = null)
     {
         var info = GetProcessorTypes(processorType);
         if (info.MessageType is null)
@@ -112,7 +114,7 @@ public class BussigRegistrationConfigurator : IBussigRegistrationConfigurator
 
     public void AddProcessorsFromAssembly(
         Assembly assembly,
-        Action<ConsumerOptions>? defaultConfigure = null
+        Action<ProcessorOptions>? defaultConfigure = null
     )
     {
         var processorTypes = assembly
