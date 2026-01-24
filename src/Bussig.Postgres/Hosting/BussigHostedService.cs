@@ -1,13 +1,23 @@
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 
 namespace Bussig;
 
-public sealed class BussigHostedService(BussigStartup startup) : IHostedService
+public sealed class BussigHostedService(
+    // MessageProcessorsLocator locator,
+    ILogger<BussigHostedService> logger
+) : IHostedService
 {
-    public async Task StartAsync(CancellationToken cancellationToken)
+    public Task StartAsync(CancellationToken cancellationToken)
     {
-        await startup.EnsureInitializedAsync(cancellationToken);
+        logger.LogInformation("Bussig starting...");
+        return Task.CompletedTask;
     }
 
     public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+}
+
+public class MessageProcessorsLocator
+{
+    // public IEnumerable<string> NameMe() { }
 }

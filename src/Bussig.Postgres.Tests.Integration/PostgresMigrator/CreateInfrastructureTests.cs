@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
-using Bussig.Postgres.Configuration;
+using Bussig.Abstractions;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Moq;
 using Npgsql;
 using Testcontainers.PostgreSql;
@@ -55,16 +56,17 @@ public class CreateInfrastructureTests
         // Arrange
         var container = await Containers.GetContainerAsync(image);
 
+        var options = new PostgresSettings { ConnectionString = container.GetConnectionString() };
         var target = new Postgres.PostgresMigrator(
             NpgsqlDataSource.Create(container.GetConnectionString()),
+            Options.Create(options),
             Mock.Of<ILogger<Postgres.PostgresMigrator>>()
         ); // TODO: FakeLogger
 
-        var options = new PostgresSettings(container.GetConnectionString());
-        await target.CreateSchema(options, CancellationToken.None);
+        await target.CreateSchema(CancellationToken.None);
 
         // Act
-        var action = async () => await target.CreateInfrastructure(options, CancellationToken.None);
+        var action = async () => await target.CreateInfrastructure(CancellationToken.None);
 
         // Assert
         using var _ = Assert.Multiple();

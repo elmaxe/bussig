@@ -1,32 +1,33 @@
+using System.Globalization;
 using Bussig.Abstractions;
-using Npgsql;
+using Microsoft.Extensions.Options;
 
 namespace Bussig.Postgres;
 
 public sealed class PostgresQueueCreator : IQueueCreator
 {
-    private readonly PostgresConnectionContext _postgresConnectionContext;
     private readonly string _createQueueSql;
 
-    public PostgresQueueCreator(PostgresConnectionContext postgresConnectionContext)
+    public PostgresQueueCreator(IOptions<PostgresSettings> options)
     {
-        _postgresConnectionContext = postgresConnectionContext;
-
+        var settings = options.Value;
         _createQueueSql = string.Format(
+            CultureInfo.InvariantCulture,
             PsqlStatements.CreateQueue,
-            _postgresConnectionContext.Settings.Schema
+            settings.Schema
         );
     }
 
-    public async Task CreateQueue(IQueue queue, CancellationToken cancellationToken)
+    public Task CreateQueue(IQueue queue, CancellationToken cancellationToken)
     {
-        await _postgresConnectionContext.Query<long>(
-            _createQueueSql,
-            [
-                new NpgsqlParameter<string> { TypedValue = queue.Name },
-                new NpgsqlParameter<int?> { TypedValue = queue.MaxDeliveryCount },
-            ],
-            cancellationToken
-        );
+        throw new NotImplementedException();
+        // await _postgresConnectionContext.Query<long>(
+        //     _createQueueSql,
+        //     [
+        //         new NpgsqlParameter<string> { TypedValue = queue.Name },
+        //         new NpgsqlParameter<int?> { TypedValue = queue.MaxDeliveryCount },
+        //     ],
+        //     cancellationToken
+        // );
     }
 }

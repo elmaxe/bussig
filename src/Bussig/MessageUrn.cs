@@ -10,7 +10,7 @@ public readonly record struct MessageUrn
 
     public MessageUrn(string value)
     {
-        if (value.StartsWith(Prefix))
+        if (value.StartsWith(Prefix, StringComparison.InvariantCulture))
         {
             _valueWithoutPrefix = value.Replace(Prefix, string.Empty);
             return;

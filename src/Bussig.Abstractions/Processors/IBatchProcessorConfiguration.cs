@@ -1,6 +1,6 @@
 namespace Bussig.Abstractions;
 
-public interface IBatchConsumerConfiguration
+public interface IBatchProcessorConfiguration
 {
     /// <summary>
     /// If less than <see cref="MessageLimit"/> are delivered within this time limit, end the batch early if at least one message has been received.

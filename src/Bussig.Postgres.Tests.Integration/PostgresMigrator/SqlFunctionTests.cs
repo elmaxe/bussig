@@ -1,6 +1,8 @@
+using System.Globalization;
 using System.Text.Json;
-using Bussig.Postgres.Configuration;
+using Bussig.Abstractions;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Moq;
 using Npgsql;
 using NpgsqlTypes;
@@ -77,14 +79,20 @@ public class SqlFunctionTests
             connection
         );
         priorityCommand.Parameters.Add(new NpgsqlParameter<Guid> { TypedValue = messageId });
-        var priority = Convert.ToInt32(await priorityCommand.ExecuteScalarAsync());
+        var priority = Convert.ToInt32(
+            await priorityCommand.ExecuteScalarAsync(),
+            CultureInfo.InvariantCulture
+        );
 
         await using var messageCountCommand = new NpgsqlCommand(
             $"""SELECT COUNT(*) FROM "{schema}".messages WHERE message_id = $1;""",
             connection
         );
         messageCountCommand.Parameters.Add(new NpgsqlParameter<Guid> { TypedValue = messageId });
-        var messageCount = Convert.ToInt64(await messageCountCommand.ExecuteScalarAsync());
+        var messageCount = Convert.ToInt64(
+            await messageCountCommand.ExecuteScalarAsync(),
+            CultureInfo.InvariantCulture
+        );
 
         await Assert.That(priority).EqualTo(16384);
         await Assert.That(messageCount).EqualTo(1);
@@ -165,14 +173,20 @@ public class SqlFunctionTests
             connection
         );
         deliveryCountCommand.Parameters.Add(new NpgsqlParameter<Guid> { TypedValue = messageId });
-        var deliveryCount = Convert.ToInt64(await deliveryCountCommand.ExecuteScalarAsync());
+        var deliveryCount = Convert.ToInt64(
+            await deliveryCountCommand.ExecuteScalarAsync(),
+            CultureInfo.InvariantCulture
+        );
 
         await using var messageCountCommand = new NpgsqlCommand(
             $"""SELECT COUNT(*) FROM "{schema}".messages WHERE message_id = $1;""",
             connection
         );
         messageCountCommand.Parameters.Add(new NpgsqlParameter<Guid> { TypedValue = messageId });
-        var messageCount = Convert.ToInt64(await messageCountCommand.ExecuteScalarAsync());
+        var messageCount = Convert.ToInt64(
+            await messageCountCommand.ExecuteScalarAsync(),
+            CultureInfo.InvariantCulture
+        );
 
         await Assert.That(completedId).EqualTo(fetched.DeliveryId);
         await Assert.That(deliveryCount).EqualTo(0);
@@ -355,7 +369,10 @@ public class SqlFunctionTests
             connection
         );
         checkCommand.Parameters.Add(new NpgsqlParameter<long> { TypedValue = fetched.DeliveryId });
-        var queueId = Convert.ToInt64(await checkCommand.ExecuteScalarAsync());
+        var queueId = Convert.ToInt64(
+            await checkCommand.ExecuteScalarAsync(),
+            CultureInfo.InvariantCulture
+        );
 
         await Assert.That(queueId).EqualTo(dlqQueueId);
     }
@@ -452,14 +469,20 @@ public class SqlFunctionTests
             connection
         );
         messageCountCommand.Parameters.Add(new NpgsqlParameter<Guid> { TypedValue = messageId });
-        var messageCount = Convert.ToInt64(await messageCountCommand.ExecuteScalarAsync());
+        var messageCount = Convert.ToInt64(
+            await messageCountCommand.ExecuteScalarAsync(),
+            CultureInfo.InvariantCulture
+        );
 
         await using var deliveryCountCommand = new NpgsqlCommand(
             $"""SELECT COUNT(*) FROM "{schema}".message_delivery WHERE message_id = $1;""",
             connection
         );
         deliveryCountCommand.Parameters.Add(new NpgsqlParameter<Guid> { TypedValue = messageId });
-        var deliveryCount = Convert.ToInt64(await deliveryCountCommand.ExecuteScalarAsync());
+        var deliveryCount = Convert.ToInt64(
+            await deliveryCountCommand.ExecuteScalarAsync(),
+            CultureInfo.InvariantCulture
+        );
 
         await Assert.That(messageCount).EqualTo(0);
         await Assert.That(deliveryCount).EqualTo(0);
@@ -633,7 +656,10 @@ public class SqlFunctionTests
             connection
         );
         countCommand.Parameters.Add(new NpgsqlParameter<string> { TypedValue = lockId });
-        var remaining = Convert.ToInt64(await countCommand.ExecuteScalarAsync());
+        var remaining = Convert.ToInt64(
+            await countCommand.ExecuteScalarAsync(),
+            CultureInfo.InvariantCulture
+        );
 
         // Assert
         await Assert.That(acquired).EqualTo(true);
@@ -709,14 +735,19 @@ public class SqlFunctionTests
     )
     {
         var dataSource = NpgsqlDataSource.Create(container.GetConnectionString());
+        var options = new PostgresSettings
+        {
+            ConnectionString = container.GetConnectionString(),
+            Schema = schema,
+        };
         var migrator = new Postgres.PostgresMigrator(
             dataSource,
+            Options.Create<PostgresSettings>(options),
             Mock.Of<ILogger<Postgres.PostgresMigrator>>()
         );
-        var options = new PostgresSettings(container.GetConnectionString(), schema);
 
-        await migrator.CreateSchema(options, cancellationToken);
-        await migrator.CreateInfrastructure(options, cancellationToken);
+        await migrator.CreateSchema(cancellationToken);
+        await migrator.CreateInfrastructure(cancellationToken);
 
         return dataSource;
     }
@@ -728,7 +759,7 @@ public class SqlFunctionTests
         int? maxDeliveryCount
     )
     {
-        var sql = string.Format(PsqlStatements.CreateQueue, schema);
+        var sql = string.Format(CultureInfo.InvariantCulture, PsqlStatements.CreateQueue, schema);
         return await ExecuteScalarLongAsync(
             connection,
             sql,
@@ -748,7 +779,7 @@ public class SqlFunctionTests
     )
     {
         var messageId = Guid.NewGuid();
-        var sql = string.Format(PsqlStatements.SendMessage, schema);
+        var sql = string.Format(CultureInfo.InvariantCulture, PsqlStatements.SendMessage, schema);
         var parameters = new NpgsqlParameter[]
         {
             new NpgsqlParameter<string> { TypedValue = queueName },
@@ -781,7 +812,7 @@ public class SqlFunctionTests
         TimeSpan lockDuration
     )
     {
-        var sql = string.Format(PsqlStatements.GetMessages, schema);
+        var sql = string.Format(CultureInfo.InvariantCulture, PsqlStatements.GetMessages, schema);
         await using var command = new NpgsqlCommand(sql, connection);
         command.Parameters.Add(new NpgsqlParameter<string> { TypedValue = queueName });
         command.Parameters.Add(new NpgsqlParameter<Guid> { TypedValue = lockId });
@@ -819,7 +850,7 @@ public class SqlFunctionTests
         command.Parameters.Add(new NpgsqlParameter<string> { TypedValue = name });
         command.Parameters.Add(new NpgsqlParameter<short> { TypedValue = type });
         var result = await command.ExecuteScalarAsync();
-        return Convert.ToInt64(result);
+        return Convert.ToInt64(result, CultureInfo.InvariantCulture);
     }
 
     private static async Task<object?> ExecuteScalarAsync(
@@ -842,7 +873,7 @@ public class SqlFunctionTests
     )
     {
         var result = await ExecuteScalarAsync(connection, sql, cancellationToken, parameters);
-        return Convert.ToInt64(result);
+        return Convert.ToInt64(result, CultureInfo.InvariantCulture);
     }
 
     private static async Task<bool> ExecuteScalarBoolAsync(
@@ -853,7 +884,7 @@ public class SqlFunctionTests
     )
     {
         var result = await ExecuteScalarAsync(connection, sql, cancellationToken, parameters);
-        return Convert.ToBoolean(result);
+        return Convert.ToBoolean(result, CultureInfo.InvariantCulture);
     }
 
     private static async Task<(DateTimeOffset ExpiresAt, int ExtendedTimes)> GetLockStateAsync(

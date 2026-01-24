@@ -1,4 +1,8 @@
+using System.Globalization;
 using Bussig.Abstractions;
+using Bussig.Constants;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using Npgsql;
 using NpgsqlTypes;
 
@@ -6,35 +10,46 @@ namespace Bussig.Postgres;
 
 public sealed class PostgresOutgoingMessageSender : IOutgoingMessageSender
 {
-    private readonly IPostgresConnectionContext _connectionContext;
+    private readonly NpgsqlDataSource _npgsqlDataSource;
     private readonly IPostgresTransactionAccessor _transactionAccessor;
+    private readonly PostgresSettings _settings;
     private readonly string _sendMessageSql;
     private readonly string _cancelScheduledSql;
 
     public PostgresOutgoingMessageSender(
-        IPostgresConnectionContext connectionContext,
+        [FromKeyedServices(ServiceKeys.BussigNpgsql)] NpgsqlDataSource npgsqlDataSource,
         IPostgresTransactionAccessor transactionAccessor,
-        IPostgresSettings settings
+        IOptions<PostgresSettings> settings
     )
     {
-        _connectionContext = connectionContext;
+        _npgsqlDataSource = npgsqlDataSource;
         _transactionAccessor = transactionAccessor;
-        _sendMessageSql = string.Format(PsqlStatements.SendMessage, settings.Schema);
-        _cancelScheduledSql = string.Format(PsqlStatements.CancelScheduledMessage, settings.Schema);
+        _settings = settings.Value;
+        _sendMessageSql = string.Format(
+            CultureInfo.InvariantCulture,
+            PsqlStatements.SendMessage,
+            _settings.Schema
+        );
+        _cancelScheduledSql = string.Format(
+            CultureInfo.InvariantCulture,
+            PsqlStatements.CancelScheduledMessage,
+            _settings.Schema
+        );
     }
 
-    public async Task<long> SendAsync(OutgoingMessage message, CancellationToken cancellationToken)
+    public async Task SendAsync(OutgoingMessage message, CancellationToken cancellationToken)
     {
         var parameters = BuildSendParameters(message);
         var transaction = _transactionAccessor.CurrentTransaction;
 
         if (transaction is null)
         {
-            return await _connectionContext.Query<long>(
-                _sendMessageSql,
-                parameters,
-                cancellationToken
-            );
+            await using var conn = await _npgsqlDataSource.OpenConnectionAsync(cancellationToken);
+            await using var cmd = new NpgsqlCommand(_sendMessageSql, conn);
+            cmd.Parameters.AddRange(parameters);
+            await cmd.ExecuteNonQueryAsync(cancellationToken);
+
+            return;
         }
 
         var connection = transaction.Connection;
@@ -45,7 +60,7 @@ public sealed class PostgresOutgoingMessageSender : IOutgoingMessageSender
 
         await using var command = new NpgsqlCommand(_sendMessageSql, connection, transaction);
         command.Parameters.AddRange(parameters);
-        return (long)await command.ExecuteScalarAsync(cancellationToken);
+        await command.ExecuteScalarAsync(cancellationToken);
     }
 
     public async Task<bool> CancelAsync(Guid schedulingToken, CancellationToken cancellationToken)
@@ -54,13 +69,10 @@ public sealed class PostgresOutgoingMessageSender : IOutgoingMessageSender
         var transaction = _transactionAccessor.CurrentTransaction;
         if (transaction is null)
         {
-            return (
-                await _connectionContext.Query<Guid?>(
-                    _cancelScheduledSql,
-                    parameters,
-                    cancellationToken
-                )
-            ).HasValue;
+            await using var conn = await _npgsqlDataSource.OpenConnectionAsync(cancellationToken);
+            await using var cmd = new NpgsqlCommand(_cancelScheduledSql, conn);
+            cmd.Parameters.AddRange(parameters);
+            return ((Guid?)await cmd.ExecuteScalarAsync(cancellationToken)).HasValue;
         }
 
         var connection = transaction.Connection;
@@ -70,7 +82,7 @@ public sealed class PostgresOutgoingMessageSender : IOutgoingMessageSender
         }
 
         await using var command = new NpgsqlCommand(_cancelScheduledSql, connection, transaction);
-        command.Parameters.Add(new NpgsqlParameter<Guid> { TypedValue = schedulingToken });
+        command.Parameters.AddRange(parameters);
         var result = (Guid?)await command.ExecuteScalarAsync(cancellationToken);
 
         return result.HasValue;
