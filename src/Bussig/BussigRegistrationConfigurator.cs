@@ -7,10 +7,6 @@ public class BussigRegistrationConfigurator : IBussigRegistrationConfigurator
     private readonly HashSet<Type> _messages = [];
     private readonly Dictionary<Type, QueueOptions> _queueOptions = new();
 
-    public string ConnectionString { get; set; } = null!;
-    public string? Schema { get; set; }
-    public IPostgresSettings? Settings { get; set; } = null;
-    public bool CreateQueuesOnStartup { get; set; } = true;
     public IReadOnlyCollection<Type> Messages => _messages;
 
     public void AddMessage<TMessage>(Action<QueueOptions>? configure = null)

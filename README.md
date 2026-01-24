@@ -16,6 +16,7 @@ Postgres Message Bus for .NET
 - Tenants?
 - OpenTelemetry
 - Priority queueing
+- Message deduplication maybe? Otherwise idempotent, or use sagas instead
 - A processor/consume context alternative that returns a message, the framework handles the sending of it, with outbox if configured
     - For example: `IConsumeMessage<TConsumeMessage>`, `IConsumeMessage<TConsumeMessage, TSendMessage>`, `IConsumeMessage<TConsumeMessage, IEnumerable<TSendMessage>>`
 ```csharp

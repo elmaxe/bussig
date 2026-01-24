@@ -7,6 +7,13 @@ public interface IBus
     Task SendAsync<TMessage>(TMessage message, CancellationToken cancellationToken = default)
         where TMessage : ICommand;
 
+    Task SendAsync<TMessage>(
+        TMessage message,
+        MessageSendOptions options,
+        CancellationToken cancellationToken = default
+    )
+        where TMessage : ICommand;
+
     Task ScheduleAsync<TMessage>(
         TMessage message,
         TimeSpan delay,
@@ -14,6 +21,14 @@ public interface IBus
         CancellationToken cancellationToken = default
     )
         where TMessage : ICommand;
+
+    Task ScheduleAsync<TMessage>(
+        TMessage message,
+        MessageSendOptions options,
+        CancellationToken cancellationToken = default
+    )
+        where TMessage : ICommand;
+
     Task ScheduleAsync<TMessage>(
         TMessage message,
         DateTimeOffset visibleAt,

@@ -9,7 +9,7 @@ public sealed class OutgoingMessage
     public Guid MessageId { get; init; }
     public short? Priority { get; init; }
     public TimeSpan? Delay { get; init; }
-    public int MessageVersion { get; init; } = 0;
+    public int MessageVersion { get; init; }
     public DateTimeOffset? ExpirationTime { get; init; }
     public Guid? SchedulingTokenId { get; init; }
 

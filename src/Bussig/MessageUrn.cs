@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Reflection;
 using System.Text;
 
@@ -6,11 +7,12 @@ namespace Bussig;
 public readonly record struct MessageUrn
 {
     private const string Prefix = "urn:message:";
+    private static readonly ConcurrentDictionary<Type, MessageUrn> Cache = new();
     private readonly string _valueWithoutPrefix;
 
     public MessageUrn(string value)
     {
-        if (value.StartsWith(Prefix))
+        if (value.StartsWith(Prefix, StringComparison.InvariantCulture))
         {
             _valueWithoutPrefix = value.Replace(Prefix, string.Empty);
             return;
@@ -23,18 +25,21 @@ public readonly record struct MessageUrn
 
     public static MessageUrn ForType(Type type)
     {
-        if (type.ContainsGenericParameters)
+        return Cache.GetOrAdd(type, static t =>
         {
-            throw new ArgumentException(
-                "A message type cannot contain generic parameters",
-                nameof(type)
-            );
-        }
+            if (t.ContainsGenericParameters)
+            {
+                throw new ArgumentException(
+                    "A message type cannot contain generic parameters",
+                    nameof(type)
+                );
+            }
 
-        var messageUrn = GetMessageUrnFromAttribute(type);
+            var messageUrn = GetMessageUrnFromAttribute(t);
 
-        return messageUrn
-            ?? new MessageUrn(GetMessageNameFromType(new StringBuilder(), type, true));
+            return messageUrn
+                ?? new MessageUrn(GetMessageNameFromType(new StringBuilder(), t, true));
+        });
     }
 
     private static MessageUrn? GetMessageUrnFromAttribute(Type type)
