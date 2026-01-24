@@ -20,7 +20,7 @@ public sealed class Bus : IBus
     }
 
     public Task SendAsync<TMessage>(TMessage message, CancellationToken cancellationToken = default)
-        where TMessage : ICommand
+        where TMessage : IMessage
     {
         return SendAsync(message, new MessageSendOptions(), cancellationToken);
     }
@@ -30,7 +30,7 @@ public sealed class Bus : IBus
         MessageSendOptions options,
         CancellationToken cancellationToken = default
     )
-        where TMessage : ICommand
+        where TMessage : IMessage
     {
         return SendAsyncInternal(message, options, cancellationToken);
     }
@@ -41,7 +41,7 @@ public sealed class Bus : IBus
         Guid? schedulingToken,
         CancellationToken cancellationToken = default
     )
-        where TMessage : ICommand
+        where TMessage : IMessage
     {
         return ScheduleAsync(
             message,
@@ -55,7 +55,7 @@ public sealed class Bus : IBus
         MessageSendOptions options,
         CancellationToken cancellationToken = default
     )
-        where TMessage : ICommand
+        where TMessage : IMessage
     {
         return SendAsyncInternal(message, options, cancellationToken);
     }
@@ -66,7 +66,7 @@ public sealed class Bus : IBus
         Guid? schedulingToken,
         CancellationToken cancellationToken = default
     )
-        where TMessage : ICommand
+        where TMessage : IMessage
     {
         if (visibleAt < DateTimeOffset.UtcNow)
         {
@@ -97,7 +97,7 @@ public sealed class Bus : IBus
         MessageSendOptions options,
         CancellationToken cancellationToken
     )
-        where TMessage : ICommand
+        where TMessage : IMessage
     {
         var queueName = MessageMetadata<TMessage>.QueueName;
         var headersJson = MessageMetadata<TMessage>.HeadersJson;
@@ -126,7 +126,7 @@ public sealed class Bus : IBus
     }
 
     private static class MessageMetadata<TMessage>
-        where TMessage : ICommand
+        where TMessage : IMessage
     {
         public static readonly string QueueName = MessageUrn.ForType<TMessage>().ToString();
         public static readonly string HeadersJson = CreateHeadersJson(QueueName);

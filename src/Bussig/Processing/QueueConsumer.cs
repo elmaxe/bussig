@@ -1,8 +1,10 @@
 using System.Reflection;
 using System.Text.Json;
 using Bussig.Abstractions;
+using Bussig.Abstractions.Messages;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Npgsql;
 using SecurityDriven;
 
 namespace Bussig.Processing;
@@ -12,10 +14,16 @@ public sealed class QueueConsumer : IAsyncDisposable
     private readonly string _queueName;
     private readonly Type _messageType;
     private readonly Type _processorType;
+    private readonly Type? _responseMessageType;
+    private readonly bool _isBatchProcessor;
+    private readonly Type? _batchMessageType;
     private readonly ConsumerOptions _options;
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly PostgresMessageReceiver _receiver;
     private readonly IMessageSerializer _serializer;
+    private readonly NpgsqlDataSource _npgsqlDataSource;
+    private readonly IPostgresTransactionAccessor _transactionAccessor;
+    private readonly IBus _bus;
     private readonly ILogger<QueueConsumer> _logger;
     private readonly SemaphoreSlim _concurrencySemaphore;
     private readonly CancellationTokenSource _stoppingCts = new();
@@ -25,27 +33,41 @@ public sealed class QueueConsumer : IAsyncDisposable
         string queueName,
         Type messageType,
         Type processorType,
+        Type? responseMessageType,
+        bool isBatchProcessor,
+        Type? batchMessageType,
         ConsumerOptions options,
         IServiceScopeFactory scopeFactory,
         PostgresMessageReceiver receiver,
         IMessageSerializer serializer,
+        NpgsqlDataSource npgsqlDataSource,
+        IPostgresTransactionAccessor transactionAccessor,
+        IBus bus,
         ILogger<QueueConsumer> logger
     )
     {
         _queueName = queueName;
         _messageType = messageType;
         _processorType = processorType;
+        _responseMessageType = responseMessageType;
+        _isBatchProcessor = isBatchProcessor;
+        _batchMessageType = batchMessageType;
         _options = options;
         _scopeFactory = scopeFactory;
         _receiver = receiver;
         _serializer = serializer;
+        _npgsqlDataSource = npgsqlDataSource;
+        _transactionAccessor = transactionAccessor;
+        _bus = bus;
         _logger = logger;
         _concurrencySemaphore = new SemaphoreSlim(options.MaxConcurrency, options.MaxConcurrency);
     }
 
     public void Start()
     {
-        _pollingTask = PollAsync(_stoppingCts.Token);
+        _pollingTask = _isBatchProcessor
+            ? PollBatchAsync(_stoppingCts.Token)
+            : PollAsync(_stoppingCts.Token);
     }
 
     public async Task StopAsync(CancellationToken cancellationToken)
@@ -147,6 +169,323 @@ public sealed class QueueConsumer : IAsyncDisposable
         _logger.LogInformation("Consumer stopped for queue {QueueName}", _queueName);
     }
 
+    private async Task PollBatchAsync(CancellationToken stoppingToken)
+    {
+        _logger.LogInformation(
+            "Starting batch consumer for queue {QueueName} with processor {ProcessorType}",
+            _queueName,
+            _processorType.Name
+        );
+
+        while (!stoppingToken.IsCancellationRequested)
+        {
+            try
+            {
+                await _concurrencySemaphore.WaitAsync(stoppingToken);
+
+                try
+                {
+                    var batch = await CollectBatchAsync(stoppingToken);
+                    if (batch.Count > 0)
+                    {
+                        await ProcessBatchAsync(batch, stoppingToken);
+                    }
+                }
+                finally
+                {
+                    _concurrencySemaphore.Release();
+                }
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                break;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(
+                    ex,
+                    "Error in batch polling for queue {QueueName}, will retry after interval",
+                    _queueName
+                );
+                await Task.Delay(_options.PollInterval, stoppingToken);
+            }
+        }
+
+        _logger.LogInformation("Batch consumer stopped for queue {QueueName}", _queueName);
+    }
+
+    private async Task<List<IncomingMessage>> CollectBatchAsync(CancellationToken stoppingToken)
+    {
+        var messages = new List<IncomingMessage>();
+        var batchStartTime = DateTime.UtcNow;
+        var lockId = FastGuid.NewPostgreSqlGuid();
+
+        while (
+            messages.Count < _options.BatchMessageLimit && !stoppingToken.IsCancellationRequested
+        )
+        {
+            var remaining = (int)(_options.BatchMessageLimit - messages.Count);
+            var fetchCount = Math.Min(remaining, _options.PrefetchCount);
+
+            var fetched = await _receiver.ReceiveAsync(
+                _queueName,
+                lockId,
+                _options.LockDuration,
+                fetchCount,
+                stoppingToken
+            );
+
+            messages.AddRange(fetched);
+
+            // Check if time limit exceeded and we have at least one message
+            if (DateTime.UtcNow - batchStartTime >= _options.BatchTimeLimit && messages.Count > 0)
+            {
+                break;
+            }
+
+            // If no messages fetched and we have some, process what we have
+            if (fetched.Count == 0)
+            {
+                if (messages.Count > 0)
+                {
+                    break;
+                }
+
+                // No messages at all, wait before next poll
+                await Task.Delay(_options.PollInterval, stoppingToken);
+            }
+        }
+
+        return messages;
+    }
+
+    private async Task ProcessBatchAsync(
+        List<IncomingMessage> incomingMessages,
+        CancellationToken stoppingToken
+    )
+    {
+        _logger.LogDebug(
+            "Processing batch of {Count} messages from queue {QueueName}",
+            incomingMessages.Count,
+            _queueName
+        );
+
+        // Start lock renewal for all messages in the batch
+        using var lockRenewalCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+        var lockRenewalTasks = incomingMessages
+            .Select(m => RunLockRenewalAsync(m.MessageDeliveryId, m.LockId, lockRenewalCts.Token))
+            .ToList();
+
+        try
+        {
+            await using var scope = _scopeFactory.CreateAsyncScope();
+
+            // Deserialize all messages and create contexts
+            var contexts = new List<object>();
+            var contextType = typeof(MessageProcessorContext<>).MakeGenericType(_batchMessageType!);
+
+            foreach (var incomingMessage in incomingMessages)
+            {
+                object? messageBody;
+                try
+                {
+                    messageBody = _serializer.Deserialize(incomingMessage.Body, _batchMessageType!);
+                }
+                catch (JsonException ex)
+                {
+                    _logger.LogError(
+                        ex,
+                        "Failed to deserialize message {MessageId} in batch, sending entire batch to dead letter",
+                        incomingMessage.MessageId
+                    );
+
+                    // Deadletter all messages in the batch
+                    await DeadletterBatchAsync(
+                        incomingMessages,
+                        ex.Message,
+                        "DeserializationFailed"
+                    );
+                    return;
+                }
+
+                if (messageBody is null)
+                {
+                    _logger.LogError(
+                        "Deserialized message {MessageId} is null in batch, sending entire batch to dead letter",
+                        incomingMessage.MessageId
+                    );
+
+                    await DeadletterBatchAsync(
+                        incomingMessages,
+                        "Message body deserialized to null",
+                        "NullMessage"
+                    );
+                    return;
+                }
+
+                var context = Activator.CreateInstance(
+                    contextType,
+                    BindingFlags.Instance | BindingFlags.NonPublic,
+                    binder: null,
+                    args:
+                    [
+                        messageBody,
+                        incomingMessage.MessageId,
+                        incomingMessage.DeliveryCount,
+                        incomingMessage.MaxDeliveryCount,
+                        incomingMessage.EnqueuedAt,
+                        incomingMessage.MessageDeliveryId,
+                        incomingMessage.LockId,
+                    ],
+                    culture: null
+                );
+
+                if (context is null)
+                {
+                    throw new InvalidOperationException(
+                        $"Failed to create context for message type {_batchMessageType!.Name}"
+                    );
+                }
+
+                contexts.Add(context);
+            }
+
+            // Create the batch using reflection
+            var batchType = typeof(MessageBatch<>).MakeGenericType(_batchMessageType!);
+            var batch = Activator.CreateInstance(
+                batchType,
+                BindingFlags.Instance | BindingFlags.Public,
+                binder: null,
+                args: [contexts.Cast<object>()],
+                culture: null
+            );
+
+            // Actually, we need to pass the correctly typed contexts
+            // Let me create it properly using a generic method
+            var createBatchMethod = GetType()
+                .GetMethod(nameof(CreateBatch), BindingFlags.NonPublic | BindingFlags.Static)!
+                .MakeGenericMethod(_batchMessageType!);
+            batch = createBatchMethod.Invoke(null, [contexts]);
+
+            // Resolve the processor
+            var processor = scope.ServiceProvider.GetRequiredService(_processorType);
+
+            // Invoke ProcessAsync
+            var processMethod = _processorType.GetMethod(nameof(IProcessor<object>.ProcessAsync));
+            if (processMethod is null)
+            {
+                throw new InvalidOperationException(
+                    $"ProcessAsync method not found on processor {_processorType.Name}"
+                );
+            }
+
+            var task = (Task)processMethod.Invoke(processor, [batch, stoppingToken])!;
+            await task;
+
+            // Complete all messages
+            foreach (var message in incomingMessages)
+            {
+                await _receiver.CompleteAsync(
+                    message.MessageDeliveryId,
+                    message.LockId,
+                    CancellationToken.None
+                );
+            }
+
+            _logger.LogDebug(
+                "Successfully processed batch of {Count} messages from queue {QueueName}",
+                incomingMessages.Count,
+                _queueName
+            );
+        }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+        {
+            _logger.LogWarning(
+                "Batch processing cancelled for {Count} messages, abandoning",
+                incomingMessages.Count
+            );
+
+            await AbandonBatchAsync(incomingMessages, TimeSpan.Zero);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(
+                ex,
+                "Error processing batch of {Count} messages from queue {QueueName}",
+                incomingMessages.Count,
+                _queueName
+            );
+
+            // Check if any message has exceeded max delivery count
+            var exceededMax = incomingMessages.Any(m => m.DeliveryCount >= m.MaxDeliveryCount);
+            if (exceededMax)
+            {
+                _logger.LogWarning(
+                    "Batch contains message(s) exceeding max delivery count, sending to dead letter"
+                );
+                await DeadletterBatchAsync(incomingMessages, ex.Message, "MaxRetriesExceeded");
+            }
+            else
+            {
+                await AbandonBatchAsync(incomingMessages, _options.RetryDelay);
+            }
+        }
+        finally
+        {
+            await lockRenewalCts.CancelAsync();
+            await Task.WhenAll(lockRenewalTasks);
+        }
+    }
+
+    private static MessageBatch<TMessage> CreateBatch<TMessage>(List<object> contexts)
+        where TMessage : class
+    {
+        var typedContexts = contexts.Cast<MessageProcessorContext<TMessage>>();
+        return new MessageBatch<TMessage>(typedContexts);
+    }
+
+    private async Task DeadletterBatchAsync(
+        List<IncomingMessage> messages,
+        string errorMessage,
+        string errorCode
+    )
+    {
+        foreach (var message in messages)
+        {
+            var headers = BuildErrorHeaders(
+                message.MessageDeliveryHeaders,
+                errorMessage,
+                errorCode
+            );
+            await _receiver.DeadletterAsync(
+                message.MessageDeliveryId,
+                message.LockId,
+                _queueName,
+                headers,
+                CancellationToken.None
+            );
+        }
+    }
+
+    private async Task AbandonBatchAsync(List<IncomingMessage> messages, TimeSpan delay)
+    {
+        foreach (var message in messages)
+        {
+            var headers = BuildErrorHeaders(
+                message.MessageDeliveryHeaders,
+                "Batch processing failed",
+                "BatchProcessingFailed"
+            );
+            await _receiver.AbandonAsync(
+                message.MessageDeliveryId,
+                message.LockId,
+                headers,
+                delay,
+                CancellationToken.None
+            );
+        }
+    }
+
     private async Task ProcessMessageAsync(
         IncomingMessage incomingMessage,
         CancellationToken stoppingToken
@@ -246,7 +585,7 @@ public sealed class QueueConsumer : IAsyncDisposable
             }
 
             // Invoke ProcessAsync using reflection
-            var processMethod = _processorType.GetMethod(nameof(IProcessor<>.ProcessAsync));
+            var processMethod = _processorType.GetMethod(nameof(IProcessor<object>.ProcessAsync));
             if (processMethod is null)
             {
                 throw new InvalidOperationException(
@@ -254,15 +593,30 @@ public sealed class QueueConsumer : IAsyncDisposable
                 );
             }
 
-            var task = (Task)processMethod.Invoke(processor, [context, stoppingToken])!;
-            await task;
+            if (_responseMessageType is not null)
+            {
+                // Request-reply processor with transactional outbox
+                await ProcessWithOutboxAsync(
+                    processor,
+                    processMethod,
+                    context,
+                    incomingMessage,
+                    stoppingToken
+                );
+            }
+            else
+            {
+                // Fire-and-forget processor
+                var task = (Task)processMethod.Invoke(processor, [context, stoppingToken])!;
+                await task;
 
-            // Complete the message
-            await _receiver.CompleteAsync(
-                incomingMessage.MessageDeliveryId,
-                incomingMessage.LockId,
-                CancellationToken.None
-            );
+                // Complete the message
+                await _receiver.CompleteAsync(
+                    incomingMessage.MessageDeliveryId,
+                    incomingMessage.LockId,
+                    CancellationToken.None
+                );
+            }
 
             _logger.LogDebug(
                 "Successfully processed message {MessageId} from queue {QueueName}",
@@ -352,17 +706,101 @@ public sealed class QueueConsumer : IAsyncDisposable
         }
     }
 
+    private async Task ProcessWithOutboxAsync(
+        object processor,
+        MethodInfo processMethod,
+        object context,
+        IncomingMessage incomingMessage,
+        CancellationToken stoppingToken
+    )
+    {
+        await using var conn = await _npgsqlDataSource.OpenConnectionAsync(stoppingToken);
+        await using var transaction = await conn.BeginTransactionAsync(stoppingToken);
+
+        using var _ = _transactionAccessor.Use(transaction);
+
+        try
+        {
+            // Invoke ProcessAsync - returns Task<TSend>
+            var task = (Task)processMethod.Invoke(processor, [context, stoppingToken])!;
+            await task;
+
+            // Get the result using reflection (task is Task<TSend>)
+            var resultProperty = task.GetType().GetProperty("Result");
+            var responseMessage = resultProperty?.GetValue(task);
+
+            // Send response message within transaction if not null
+            if (responseMessage is not null && responseMessage is IMessage)
+            {
+                // Use reflection to call IBus.SendAsync<TMessage>
+                var sendMethod = typeof(IBus)
+                    .GetMethods()
+                    .First(m =>
+                        m.Name == nameof(IBus.SendAsync)
+                        && m.GetParameters().Length == 2
+                        && m.GetParameters()[1].ParameterType == typeof(CancellationToken)
+                    );
+                var genericSendMethod = sendMethod.MakeGenericMethod(_responseMessageType!);
+
+                await (Task)genericSendMethod.Invoke(_bus, [responseMessage, stoppingToken])!;
+
+                _logger.LogDebug(
+                    "Sent response message of type {ResponseType} for message {MessageId}",
+                    _responseMessageType!.Name,
+                    incomingMessage.MessageId
+                );
+            }
+
+            // Complete message within transaction
+            await _receiver.CompleteWithinTransactionAsync(
+                conn,
+                transaction,
+                incomingMessage.MessageDeliveryId,
+                incomingMessage.LockId,
+                stoppingToken
+            );
+
+            await transaction.CommitAsync(stoppingToken);
+        }
+        catch
+        {
+            await transaction.RollbackAsync(CancellationToken.None);
+            throw;
+        }
+    }
+
     private async Task RunLockRenewalAsync(
         long messageDeliveryId,
         Guid lockId,
         CancellationToken cancellationToken
     )
     {
+        if (!_options.EnableLockRenewal)
+        {
+            return;
+        }
+
+        var renewalCount = 0;
+
         try
         {
             while (!cancellationToken.IsCancellationRequested)
             {
                 await Task.Delay(_options.LockRenewalInterval, cancellationToken);
+
+                // Check max renewal count
+                if (
+                    _options.MaxLockRenewalCount.HasValue
+                    && renewalCount >= _options.MaxLockRenewalCount.Value
+                )
+                {
+                    _logger.LogWarning(
+                        "Lock renewal limit ({MaxCount}) reached for message delivery {MessageDeliveryId}",
+                        _options.MaxLockRenewalCount.Value,
+                        messageDeliveryId
+                    );
+                    break;
+                }
 
                 var renewed = await _receiver.RenewLockAsync(
                     messageDeliveryId,
@@ -379,6 +817,14 @@ public sealed class QueueConsumer : IAsyncDisposable
                     );
                     break;
                 }
+
+                renewalCount++;
+
+                _logger.LogDebug(
+                    "Renewed lock for message delivery {MessageDeliveryId} (renewal #{Count})",
+                    messageDeliveryId,
+                    renewalCount
+                );
             }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)

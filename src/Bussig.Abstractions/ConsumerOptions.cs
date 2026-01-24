@@ -42,4 +42,31 @@ public sealed class ConsumerOptions
     /// Default: 30 seconds
     /// </summary>
     public TimeSpan RetryDelay { get; set; } = TimeSpan.FromSeconds(30);
+
+    /// <summary>
+    /// Whether to automatically renew message locks during processing.
+    /// Default: true
+    /// </summary>
+    public bool EnableLockRenewal { get; set; } = true;
+
+    /// <summary>
+    /// Maximum number of times a lock can be renewed.
+    /// Default: null (unlimited)
+    /// </summary>
+    public int? MaxLockRenewalCount { get; set; }
+
+    // Batch processing options (only used when processor is a batch processor)
+
+    /// <summary>
+    /// Time limit for collecting messages into a batch.
+    /// If less than BatchMessageLimit messages arrive within this time, process the batch early.
+    /// Default: 5 seconds
+    /// </summary>
+    public TimeSpan BatchTimeLimit { get; set; } = TimeSpan.FromSeconds(5);
+
+    /// <summary>
+    /// Maximum number of messages in a batch.
+    /// Default: 100
+    /// </summary>
+    public uint BatchMessageLimit { get; set; } = 100;
 }

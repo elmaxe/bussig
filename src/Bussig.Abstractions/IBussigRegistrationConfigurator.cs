@@ -1,3 +1,5 @@
+using System.Reflection;
+
 namespace Bussig.Abstractions;
 
 public interface IBussigRegistrationConfigurator
@@ -16,5 +18,24 @@ public interface IBussigRegistrationConfigurator
         Type messageType,
         Type processorType,
         Action<ConsumerOptions>? configure = null
+    );
+
+    /// <summary>
+    /// Registers a processor, inferring the message type from the processor's IProcessor interface.
+    /// </summary>
+    void AddProcessor<TProcessor>(Action<ConsumerOptions>? configure = null)
+        where TProcessor : class, IProcessor;
+
+    /// <summary>
+    /// Registers a processor, inferring the message type from the processor's IProcessor interface.
+    /// </summary>
+    void AddProcessor(Type processorType, Action<ConsumerOptions>? configure = null);
+
+    /// <summary>
+    /// Scans an assembly for all IProcessor implementations and registers them.
+    /// </summary>
+    void AddProcessorsFromAssembly(
+        Assembly assembly,
+        Action<ConsumerOptions>? defaultConfigure = null
     );
 }

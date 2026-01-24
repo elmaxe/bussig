@@ -177,4 +177,21 @@ public sealed class PostgresMessageReceiver
         var result = await cmd.ExecuteScalarAsync(cancellationToken);
         return result is long;
     }
+
+    public async Task<bool> CompleteWithinTransactionAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        long messageDeliveryId,
+        Guid lockId,
+        CancellationToken cancellationToken
+    )
+    {
+        await using var cmd = new NpgsqlCommand(_completeMessageSql, connection, transaction);
+
+        cmd.Parameters.Add(new NpgsqlParameter<long> { TypedValue = messageDeliveryId });
+        cmd.Parameters.Add(new NpgsqlParameter<Guid> { TypedValue = lockId });
+
+        var result = await cmd.ExecuteScalarAsync(cancellationToken);
+        return result is long;
+    }
 }

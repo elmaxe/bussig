@@ -18,12 +18,12 @@ public sealed class MigrationHostedService(
     private readonly MigrationOptions _options = options.Value;
     private readonly PostgresSettings _postgresSettings = transportOptions.Value;
 
-    private readonly IPostgresMigrator _migrator = serviceScopeFactory
-        .CreateScope()
-        .ServiceProvider.GetRequiredService<IPostgresMigrator>();
-
     public async Task StartAsync(CancellationToken cancellationToken)
     {
+        var migrator = serviceScopeFactory
+            .CreateScope()
+            .ServiceProvider.GetRequiredService<IPostgresMigrator>();
+
         var database = _postgresSettings.Database;
         var schema = _postgresSettings.Schema;
 
@@ -31,7 +31,7 @@ public sealed class MigrationHostedService(
         {
             logger.LogInformation("Creating database {Database}", database);
 
-            await _migrator.CreateDatabase(cancellationToken);
+            await migrator.CreateDatabase(cancellationToken);
         }
 
         if (_options.CreateSchema)
@@ -42,7 +42,7 @@ public sealed class MigrationHostedService(
                 database
             );
 
-            await _migrator.CreateSchema(cancellationToken);
+            await migrator.CreateSchema(cancellationToken);
         }
 
         if (_options.CreateInfrastructure)
@@ -53,17 +53,21 @@ public sealed class MigrationHostedService(
                 database
             );
 
-            await _migrator.CreateInfrastructure(cancellationToken);
+            await migrator.CreateInfrastructure(cancellationToken);
         }
     }
 
     public async Task StopAsync(CancellationToken cancellationToken)
     {
+        var migrator = serviceScopeFactory
+            .CreateScope()
+            .ServiceProvider.GetRequiredService<IPostgresMigrator>();
+
         if (_options.DeleteDatabase)
         {
             logger.LogInformation("Deleting database {Database}", _postgresSettings.Database);
 
-            await _migrator.DeleteDatabase(cancellationToken);
+            await migrator.DeleteDatabase(cancellationToken);
         }
     }
 }

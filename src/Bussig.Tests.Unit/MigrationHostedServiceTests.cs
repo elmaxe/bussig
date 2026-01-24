@@ -2,6 +2,7 @@ using Bussig.Abstractions;
 using Bussig.Abstractions.Host;
 using Bussig.Configuration;
 using Bussig.Hosting;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
@@ -14,6 +15,9 @@ public class MigrationHostedServiceTests
     private readonly MigrationOptions _migrationOptions;
     private readonly PostgresSettings _postgresSettings;
     private readonly Mock<ILogger<MigrationHostedService>> _loggerMock;
+    private readonly Mock<IServiceScopeFactory> _scopeFactoryMock;
+    private readonly Mock<IServiceScope> _scopeMock;
+    private readonly Mock<IServiceProvider> _serviceProviderMock;
 
     public MigrationHostedServiceTests()
     {
@@ -26,13 +30,24 @@ public class MigrationHostedServiceTests
             ConnectionString = "Host=localhost;Database=testdb",
         }.Apply();
         _loggerMock = new Mock<ILogger<MigrationHostedService>>();
+
+        _serviceProviderMock = new Mock<IServiceProvider>();
+        _serviceProviderMock
+            .Setup(x => x.GetService(typeof(IPostgresMigrator)))
+            .Returns(_migratorMock.Object);
+
+        _scopeMock = new Mock<IServiceScope>();
+        _scopeMock.Setup(x => x.ServiceProvider).Returns(_serviceProviderMock.Object);
+
+        _scopeFactoryMock = new Mock<IServiceScopeFactory>();
+        _scopeFactoryMock.Setup(x => x.CreateScope()).Returns(_scopeMock.Object);
     }
 
     private MigrationHostedService CreateSut() =>
         new(
             Options.Create(_migrationOptions),
             Options.Create(_postgresSettings),
-            _migratorMock.Object,
+            _scopeFactoryMock.Object,
             _loggerMock.Object
         );
 
