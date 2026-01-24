@@ -1,7 +1,7 @@
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
-namespace Bussig;
+namespace Bussig.Hosting;
 
 public sealed class BussigHostedService(
     // MessageProcessorsLocator locator,

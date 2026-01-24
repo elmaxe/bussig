@@ -1,7 +1,6 @@
 using Npgsql;
-using System.Threading;
 
-namespace Bussig.Postgres;
+namespace Bussig;
 
 public interface IPostgresTransactionAccessor
 {

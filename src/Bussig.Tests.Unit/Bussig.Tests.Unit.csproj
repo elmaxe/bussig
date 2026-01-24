@@ -10,6 +10,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\Bussig.Postgres\Bussig.Postgres.csproj" />
+    <ProjectReference Include="..\Bussig\Bussig.csproj" />
   </ItemGroup>
 </Project>

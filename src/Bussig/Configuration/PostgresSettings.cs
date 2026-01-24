@@ -1,6 +1,6 @@
 using Npgsql;
 
-namespace Bussig.Postgres.Configuration;
+namespace Bussig.Configuration;
 
 public sealed class PostgresSettings
 {

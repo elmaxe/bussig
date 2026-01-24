@@ -1,6 +1,6 @@
 using System.Text;
 
-namespace Bussig.Postgres;
+namespace Bussig;
 
 public static class PsqlStatements
 {

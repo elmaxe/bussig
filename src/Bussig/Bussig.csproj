@@ -4,6 +4,23 @@
     <ProjectReference Include="..\Bussig.Abstractions\Bussig.Abstractions.csproj" />
   </ItemGroup>
   <ItemGroup>
+    <PackageReference Include="FastGuid" Version="1.4.1" />
+    <PackageReference
+      Include="Microsoft.Extensions.DependencyInjection.Abstractions"
+      Version="10.0.1"
+    />
     <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.1" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.1" />
+    <PackageReference Include="Npgsql" Version="10.0.1" />
+    <PackageReference Include="Npgsql.DependencyInjection" Version="10.0.1" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Update="infrastructure.sql">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Bussig.Tests.Unit" />
+    <InternalsVisibleTo Include="Bussig.Postgres.Tests.Integration" />
   </ItemGroup>
 </Project>

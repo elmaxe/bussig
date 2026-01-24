@@ -1,4 +1,4 @@
-namespace Bussig.Postgres;
+namespace Bussig;
 
 // public interface IPostgresConnectionContext
 // {

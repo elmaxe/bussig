@@ -1,11 +1,10 @@
 using Bussig.Abstractions.Host;
-using Bussig.Postgres;
-using Bussig.Postgres.Configuration;
+using Bussig.Configuration;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
-namespace Bussig;
+namespace Bussig.Hosting;
 
 public sealed class MigrationHostedService(
     IOptions<MigrationOptions> options,

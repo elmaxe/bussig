@@ -1,7 +1,7 @@
 using System.Text.Json;
 using Bussig.Abstractions;
 
-namespace Bussig.Postgres.Serialization;
+namespace Bussig.Serialization;
 
 public sealed class SystemTextJsonMessageSerializer : IMessageSerializer
 {

@@ -1,6 +1,6 @@
 using System.Globalization;
 using System.Text.Json;
-using Bussig.Postgres.Configuration;
+using Bussig.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
@@ -8,7 +8,7 @@ using Npgsql;
 using NpgsqlTypes;
 using Testcontainers.PostgreSql;
 
-namespace Bussig.Postgres.Tests.Integration.PostgresMigrator;
+namespace Bussig.Tests.Integration.PostgresMigrator;
 
 public class SqlFunctionTests
 {
@@ -740,10 +740,10 @@ public class SqlFunctionTests
             ConnectionString = container.GetConnectionString(),
             Schema = schema,
         };
-        var migrator = new Postgres.PostgresMigrator(
+        var migrator = new Bussig.PostgresMigrator(
             dataSource,
             Options.Create<PostgresSettings>(options),
-            Mock.Of<ILogger<Postgres.PostgresMigrator>>()
+            Mock.Of<ILogger<Bussig.PostgresMigrator>>()
         );
 
         await migrator.CreateSchema(cancellationToken);

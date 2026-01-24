@@ -1,9 +1,9 @@
 using System.Globalization;
 using Bussig.Abstractions;
-using Bussig.Postgres.Configuration;
+using Bussig.Configuration;
 using Microsoft.Extensions.Options;
 
-namespace Bussig.Postgres;
+namespace Bussig;
 
 public sealed class PostgresQueueCreator : IQueueCreator
 {

@@ -1,13 +1,13 @@
 using System.Globalization;
 using System.Text;
+using Bussig.Configuration;
 using Bussig.Constants;
-using Bussig.Postgres.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Npgsql;
 
-namespace Bussig.Postgres;
+namespace Bussig;
 
 public class PostgresMigrator(
     [FromKeyedServices(ServiceKeys.BussigNpgsql)] NpgsqlDataSource npgsqlDataSource,

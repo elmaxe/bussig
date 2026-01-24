@@ -1,5 +1,5 @@
 using System.Collections.Concurrent;
-using Bussig.Postgres.Configuration;
+using Bussig.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
@@ -7,7 +7,7 @@ using Npgsql;
 using Testcontainers.PostgreSql;
 using TUnit.Core.Interfaces;
 
-namespace Bussig.Postgres.Tests.Integration.PostgresMigrator;
+namespace Bussig.Tests.Integration.PostgresMigrator;
 
 public sealed class PostgresContainerPool : IAsyncInitializer, IAsyncDisposable
 {
@@ -59,10 +59,10 @@ public class CreateInfrastructureTests
         var options = PostgresSettingsFactory.Build(
             new PostgresSettings { ConnectionString = container.GetConnectionString() }
         );
-        var target = new Postgres.PostgresMigrator(
+        var target = new Bussig.PostgresMigrator(
             NpgsqlDataSource.Create(container.GetConnectionString()),
             Options.Create(options),
-            Mock.Of<ILogger<Postgres.PostgresMigrator>>()
+            Mock.Of<ILogger<Bussig.PostgresMigrator>>()
         );
 
         await target.CreateSchema(CancellationToken.None);

@@ -1,8 +1,8 @@
 ﻿using Bussig.Abstractions;
+using Bussig.Configuration;
 using Bussig.Constants;
-using Bussig.Postgres;
-using Bussig.Postgres.Configuration;
-using Bussig.Postgres.Serialization;
+using Bussig.Hosting;
+using Bussig.Serialization;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Npgsql;

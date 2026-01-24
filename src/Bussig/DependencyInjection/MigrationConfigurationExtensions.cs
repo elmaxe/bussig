@@ -1,7 +1,8 @@
 using Bussig.Abstractions.Host;
+using Bussig.Hosting;
 using Microsoft.Extensions.DependencyInjection;
 
-namespace Bussig.Postgres;
+namespace Bussig;
 
 public static class MigrationConfigurationExtensions
 {

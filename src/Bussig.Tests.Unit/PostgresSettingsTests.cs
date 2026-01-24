@@ -1,4 +1,4 @@
-using Bussig.Postgres.Configuration;
+using Bussig.Configuration;
 
 namespace Bussig.Tests.Unit;
 
@@ -165,10 +165,7 @@ public class PostgresSettingsTests
     public async Task Apply_SetsDefaultPort_WhenPortNotInConnectionString()
     {
         // Arrange
-        var settings = new PostgresSettings
-        {
-            ConnectionString = "Host=localhost;Database=mydb",
-        };
+        var settings = new PostgresSettings { ConnectionString = "Host=localhost;Database=mydb" };
 
         // Act
         settings.Apply();
@@ -220,10 +217,7 @@ public class PostgresSettingsTests
     public async Task Apply_UpdatesConnectionString_WithSchema()
     {
         // Arrange
-        var settings = new PostgresSettings
-        {
-            ConnectionString = "Host=localhost;Database=mydb",
-        };
+        var settings = new PostgresSettings { ConnectionString = "Host=localhost;Database=mydb" };
 
         // Act
         settings.Apply();

@@ -10,6 +10,6 @@
     <PackageReference Include="TUnit" Version="1.5.1" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="..\Bussig.Postgres\Bussig.Postgres.csproj" />
+    <ProjectReference Include="..\Bussig\Bussig.csproj" />
   </ItemGroup>
 </Project>

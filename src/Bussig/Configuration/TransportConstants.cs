@@ -1,4 +1,4 @@
-namespace Bussig.Postgres.Configuration;
+namespace Bussig.Configuration;
 
 public static class TransportConstants
 {

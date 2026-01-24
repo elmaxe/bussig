@@ -3,7 +3,7 @@ using Bussig.Abstractions;
 using Bussig.Abstractions.Messages;
 using SecurityDriven;
 
-namespace Bussig.Postgres;
+namespace Bussig;
 
 public sealed class Bus : IBus
 {

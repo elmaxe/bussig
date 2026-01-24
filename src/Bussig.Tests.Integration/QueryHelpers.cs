@@ -1,6 +1,6 @@
 using Npgsql;
 
-namespace Bussig.Postgres.Tests.Integration;
+namespace Bussig.Tests.Integration;
 
 public static class QueryHelpers
 {
