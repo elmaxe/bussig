@@ -153,7 +153,9 @@ public class PostgresMigratorTests
         var existsBefore = await DatabaseExistsAsync(container, databaseName);
 
         // Use a connection to the postgres database (not the one being deleted)
-        var adminConnectionString = new NpgsqlConnectionStringBuilder(container.GetConnectionString())
+        var adminConnectionString = new NpgsqlConnectionStringBuilder(
+            container.GetConnectionString()
+        )
         {
             Database = "postgres",
         }.ToString();
@@ -188,7 +190,9 @@ public class PostgresMigratorTests
             }
         );
 
-        var adminConnectionString = new NpgsqlConnectionStringBuilder(container.GetConnectionString())
+        var adminConnectionString = new NpgsqlConnectionStringBuilder(
+            container.GetConnectionString()
+        )
         {
             Database = "postgres",
         }.ToString();
@@ -206,7 +210,10 @@ public class PostgresMigratorTests
         await Assert.That(action).ThrowsNothing();
     }
 
-    private static async Task<bool> DatabaseExistsAsync(PostgreSqlContainer container, string databaseName)
+    private static async Task<bool> DatabaseExistsAsync(
+        PostgreSqlContainer container,
+        string databaseName
+    )
     {
         await using var connection = new NpgsqlConnection(container.GetConnectionString());
         await connection.OpenAsync();
@@ -221,7 +228,10 @@ public class PostgresMigratorTests
         return Convert.ToInt64(result, CultureInfo.InvariantCulture) == 1;
     }
 
-    private static async Task<bool> SchemaExistsAsync(PostgreSqlContainer container, string schemaName)
+    private static async Task<bool> SchemaExistsAsync(
+        PostgreSqlContainer container,
+        string schemaName
+    )
     {
         await using var connection = new NpgsqlConnection(container.GetConnectionString());
         await connection.OpenAsync();
@@ -236,12 +246,18 @@ public class PostgresMigratorTests
         return Convert.ToInt64(result, CultureInfo.InvariantCulture) == 1;
     }
 
-    private static async Task CreateDatabaseAsync(PostgreSqlContainer container, string databaseName)
+    private static async Task CreateDatabaseAsync(
+        PostgreSqlContainer container,
+        string databaseName
+    )
     {
         await using var connection = new NpgsqlConnection(container.GetConnectionString());
         await connection.OpenAsync();
 
-        await using var command = new NpgsqlCommand($"""CREATE DATABASE "{databaseName}";""", connection);
+        await using var command = new NpgsqlCommand(
+            $"""CREATE DATABASE "{databaseName}";""",
+            connection
+        );
         await command.ExecuteNonQueryAsync();
     }
 }

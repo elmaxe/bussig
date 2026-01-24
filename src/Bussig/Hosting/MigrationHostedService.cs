@@ -1,6 +1,7 @@
 using Bussig.Abstractions;
 using Bussig.Abstractions.Host;
 using Bussig.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -10,12 +11,16 @@ namespace Bussig.Hosting;
 public sealed class MigrationHostedService(
     IOptions<MigrationOptions> options,
     IOptions<PostgresSettings> transportOptions,
-    IPostgresMigrator migrator,
+    IServiceScopeFactory serviceScopeFactory,
     ILogger<MigrationHostedService> logger
 ) : IHostedService
 {
     private readonly MigrationOptions _options = options.Value;
     private readonly PostgresSettings _postgresSettings = transportOptions.Value;
+
+    private readonly IPostgresMigrator _migrator = serviceScopeFactory
+        .CreateScope()
+        .ServiceProvider.GetRequiredService<IPostgresMigrator>();
 
     public async Task StartAsync(CancellationToken cancellationToken)
     {
@@ -26,7 +31,7 @@ public sealed class MigrationHostedService(
         {
             logger.LogInformation("Creating database {Database}", database);
 
-            await migrator.CreateDatabase(cancellationToken);
+            await _migrator.CreateDatabase(cancellationToken);
         }
 
         if (_options.CreateSchema)
@@ -37,7 +42,7 @@ public sealed class MigrationHostedService(
                 database
             );
 
-            await migrator.CreateSchema(cancellationToken);
+            await _migrator.CreateSchema(cancellationToken);
         }
 
         if (_options.CreateInfrastructure)
@@ -48,7 +53,7 @@ public sealed class MigrationHostedService(
                 database
             );
 
-            await migrator.CreateInfrastructure(cancellationToken);
+            await _migrator.CreateInfrastructure(cancellationToken);
         }
     }
 
@@ -58,7 +63,7 @@ public sealed class MigrationHostedService(
         {
             logger.LogInformation("Deleting database {Database}", _postgresSettings.Database);
 
-            await migrator.DeleteDatabase(cancellationToken);
+            await _migrator.DeleteDatabase(cancellationToken);
         }
     }
 }

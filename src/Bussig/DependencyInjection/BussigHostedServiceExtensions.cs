@@ -1,4 +1,4 @@
-﻿using Bussig.Abstractions;
+using Bussig.Abstractions;
 using Bussig.Configuration;
 using Bussig.Constants;
 using Bussig.Hosting;
@@ -36,6 +36,7 @@ public static class BussigHostedServiceExtensions
     )
     {
         services.AddSingleton<IBussigRegistrationConfigurator>(configurator);
+        services.AddSingleton(configurator);
 
         // Post-configure to extract values from connection string
         services.ConfigureOptions<PostgresSettingsPostConfigure>();
@@ -60,5 +61,14 @@ public static class BussigHostedServiceExtensions
         services.AddSingleton<PostgresQueueCreator>();
         services.AddSingleton<IOutgoingMessageSender, PostgresOutgoingMessageSender>();
         services.AddSingleton<IBus, Bus>();
+
+        // Register message receiver for consuming messages
+        services.AddSingleton<PostgresMessageReceiver>();
+
+        // Register each processor as scoped service
+        foreach (var registration in configurator.ProcessorRegistrations)
+        {
+            services.AddScoped(registration.ProcessorType);
+        }
     }
 }
