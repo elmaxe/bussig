@@ -1,6 +1,5 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
-  <PropertyGroup></PropertyGroup>
-  <ItemGroup>
-    <Folder Include="Processors\Options\" />
-  </ItemGroup>
+  <PropertyGroup>
+    <Version>10.0.0-alpha</Version>
+  </PropertyGroup>
 </Project>

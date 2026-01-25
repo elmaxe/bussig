@@ -2,6 +2,7 @@ using Bussig.Abstractions;
 using Bussig.Configuration;
 using Bussig.Constants;
 using Bussig.Hosting;
+using Bussig.Processing;
 using Bussig.Serialization;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
@@ -64,6 +65,9 @@ public static class BussigHostedServiceExtensions
 
         // Register message receiver for consuming messages
         services.AddSingleton<PostgresMessageReceiver>();
+
+        // Register consumer factory for creating queue consumers
+        services.AddSingleton<QueueConsumerFactory>();
 
         // Register each processor as scoped service
         foreach (var registration in configurator.ProcessorRegistrations)

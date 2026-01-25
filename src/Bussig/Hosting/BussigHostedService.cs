@@ -1,10 +1,6 @@
-using Bussig.Abstractions;
-using Bussig.Constants;
 using Bussig.Processing;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using Npgsql;
 
 namespace Bussig.Hosting;
 
@@ -12,40 +8,22 @@ public sealed class BussigHostedService : IHostedService, IAsyncDisposable
 {
     private readonly BussigRegistrationConfigurator _configurator;
     private readonly IReadOnlyList<ProcessorRegistration> _registrations;
-    private readonly IServiceScopeFactory _scopeFactory;
-    private readonly PostgresMessageReceiver _receiver;
     private readonly PostgresQueueCreator _queueCreator;
-    private readonly IMessageSerializer _serializer;
-    private readonly NpgsqlDataSource _npgsqlDataSource;
-    private readonly IPostgresTransactionAccessor _transactionAccessor;
-    private readonly IBus _bus;
-    private readonly ILoggerFactory _loggerFactory;
+    private readonly QueueConsumerFactory _consumerFactory;
     private readonly ILogger<BussigHostedService> _logger;
     private readonly List<QueueConsumer> _consumers = [];
 
     public BussigHostedService(
         BussigRegistrationConfigurator configurator,
-        IServiceScopeFactory scopeFactory,
-        PostgresMessageReceiver receiver,
         PostgresQueueCreator queueCreator,
-        IMessageSerializer serializer,
-        [FromKeyedServices(ServiceKeys.BussigNpgsql)] NpgsqlDataSource npgsqlDataSource,
-        IPostgresTransactionAccessor transactionAccessor,
-        IBus bus,
-        ILoggerFactory loggerFactory,
+        QueueConsumerFactory consumerFactory,
         ILogger<BussigHostedService> logger
     )
     {
         _configurator = configurator;
         _registrations = configurator.ProcessorRegistrations;
-        _scopeFactory = scopeFactory;
-        _receiver = receiver;
         _queueCreator = queueCreator;
-        _serializer = serializer;
-        _npgsqlDataSource = npgsqlDataSource;
-        _transactionAccessor = transactionAccessor;
-        _bus = bus;
-        _loggerFactory = loggerFactory;
+        _consumerFactory = consumerFactory;
         _logger = logger;
     }
 
@@ -81,23 +59,7 @@ public sealed class BussigHostedService : IHostedService, IAsyncDisposable
                 registration.ProcessorType.Name
             );
 
-            var consumer = new QueueConsumer(
-                registration.QueueName,
-                registration.MessageType,
-                registration.ProcessorType,
-                registration.ResponseMessageType,
-                registration.IsBatchProcessor,
-                registration.BatchMessageType,
-                registration.Options,
-                _scopeFactory,
-                _receiver,
-                _serializer,
-                _npgsqlDataSource,
-                _transactionAccessor,
-                _bus,
-                _loggerFactory.CreateLogger<QueueConsumer>()
-            );
-
+            var consumer = _consumerFactory.Create(registration);
             consumer.Start();
             _consumers.Add(consumer);
         }
