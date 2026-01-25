@@ -1,3 +1,5 @@
+using Bussig.Abstractions.Messages;
+
 namespace Bussig.Abstractions;
 
 /// <summary>
@@ -16,6 +18,7 @@ public interface IProcessor<in TMessage> : IProcessor
 
 public interface IProcessor<in TMessage, TSendMessage> : IProcessor
     where TMessage : class
+    where TSendMessage : class, IMessage
 {
     Task<TSendMessage> ProcessAsync(
         ProcessorContext<TMessage> context,

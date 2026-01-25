@@ -3,6 +3,7 @@
     <File Path=".config/dotnet-tools.json" />
     <File Path=".gitattributes" />
     <File Path=".gitignore" />
+    <File Path="CLAUDE.md" />
     <File Path="Directory.Build.props" />
     <File Path="LICENSE" />
     <File Path="README.md" />

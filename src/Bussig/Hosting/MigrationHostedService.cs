@@ -1,6 +1,7 @@
 using Bussig.Abstractions;
 using Bussig.Abstractions.Host;
 using Bussig.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -10,7 +11,7 @@ namespace Bussig.Hosting;
 public sealed class MigrationHostedService(
     IOptions<MigrationOptions> options,
     IOptions<PostgresSettings> transportOptions,
-    IPostgresMigrator migrator,
+    IServiceScopeFactory serviceScopeFactory,
     ILogger<MigrationHostedService> logger
 ) : IHostedService
 {
@@ -19,6 +20,10 @@ public sealed class MigrationHostedService(
 
     public async Task StartAsync(CancellationToken cancellationToken)
     {
+        var migrator = serviceScopeFactory
+            .CreateScope()
+            .ServiceProvider.GetRequiredService<IPostgresMigrator>();
+
         var database = _postgresSettings.Database;
         var schema = _postgresSettings.Schema;
 
@@ -54,6 +59,10 @@ public sealed class MigrationHostedService(
 
     public async Task StopAsync(CancellationToken cancellationToken)
     {
+        var migrator = serviceScopeFactory
+            .CreateScope()
+            .ServiceProvider.GetRequiredService<IPostgresMigrator>();
+
         if (_options.DeleteDatabase)
         {
             logger.LogInformation("Deleting database {Database}", _postgresSettings.Database);

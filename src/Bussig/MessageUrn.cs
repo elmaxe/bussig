@@ -25,21 +25,24 @@ public readonly record struct MessageUrn
 
     public static MessageUrn ForType(Type type)
     {
-        return Cache.GetOrAdd(type, static t =>
-        {
-            if (t.ContainsGenericParameters)
+        return Cache.GetOrAdd(
+            type,
+            static t =>
             {
-                throw new ArgumentException(
-                    "A message type cannot contain generic parameters",
-                    nameof(type)
-                );
+                if (t.ContainsGenericParameters)
+                {
+                    throw new ArgumentException(
+                        "A message type cannot contain generic parameters",
+                        nameof(type)
+                    );
+                }
+
+                var messageUrn = GetMessageUrnFromAttribute(t);
+
+                return messageUrn
+                    ?? new MessageUrn(GetMessageNameFromType(new StringBuilder(), t, true));
             }
-
-            var messageUrn = GetMessageUrnFromAttribute(t);
-
-            return messageUrn
-                ?? new MessageUrn(GetMessageNameFromType(new StringBuilder(), t, true));
-        });
+        );
     }
 
     private static MessageUrn? GetMessageUrnFromAttribute(Type type)

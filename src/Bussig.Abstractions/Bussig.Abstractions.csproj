@@ -1,3 +1,5 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
-  <PropertyGroup></PropertyGroup>
+  <PropertyGroup>
+    <Version>10.0.0-alpha</Version>
+  </PropertyGroup>
 </Project>

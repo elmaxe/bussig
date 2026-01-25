@@ -14,4 +14,9 @@ public sealed class SystemTextJsonMessageSerializer : IMessageSerializer
 
     public byte[] SerializeToUtf8Bytes<T>(T message) =>
         JsonSerializer.SerializeToUtf8Bytes(message, _options);
+
+    public T? Deserialize<T>(byte[] data) => JsonSerializer.Deserialize<T>(data, _options);
+
+    public object? Deserialize(byte[] data, Type type) =>
+        JsonSerializer.Deserialize(data, type, _options);
 }

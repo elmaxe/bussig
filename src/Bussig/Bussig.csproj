@@ -1,5 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
-  <PropertyGroup></PropertyGroup>
+  <PropertyGroup>
+    <Version>10.0.0-alpha</Version>
+  </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\Bussig.Abstractions\Bussig.Abstractions.csproj" />
   </ItemGroup>
