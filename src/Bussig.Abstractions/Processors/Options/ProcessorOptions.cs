@@ -25,4 +25,10 @@ public sealed class ProcessorOptions
     /// Only used when processor is a batch processor.
     /// </summary>
     public BatchProcessingOptions Batch { get; } = new();
+
+    /// <summary>
+    /// Options for processor-specific middleware.
+    /// Middleware added here runs after global middleware.
+    /// </summary>
+    public MiddlewareOptions Middleware { get; } = new();
 }

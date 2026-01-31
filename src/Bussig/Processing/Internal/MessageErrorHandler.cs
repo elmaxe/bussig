@@ -105,6 +105,22 @@ internal sealed class MessageErrorHandler
         );
     }
 
+    public async Task AbandonAsync(
+        IReadOnlyList<IncomingMessage> messages,
+        string errorMessage,
+        string errorCode,
+        TimeSpan delay,
+        CancellationToken cancellationToken
+    )
+    {
+        var deliveryIds = messages.Select(m => m.MessageDeliveryId).ToArray();
+        var lockIds = messages.Select(m => m.LockId).ToArray();
+        var headers = messages.Select(m =>
+            BuildErrorHeaders(m.MessageDeliveryHeaders, errorMessage, errorCode)
+        );
+        await _receiver.AbandonAsync(deliveryIds, lockIds, headers, delay, cancellationToken);
+    }
+
     public async Task AbandonWithoutErrorAsync(
         IncomingMessage message,
         CancellationToken cancellationToken

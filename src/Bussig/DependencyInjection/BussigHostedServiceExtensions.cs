@@ -3,8 +3,10 @@ using Bussig.Configuration;
 using Bussig.Constants;
 using Bussig.Hosting;
 using Bussig.Processing;
+using Bussig.Processing.Middleware;
 using Bussig.Serialization;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Npgsql;
 
@@ -66,13 +68,65 @@ public static class BussigHostedServiceExtensions
         // Register message receiver for consuming messages
         services.AddSingleton<PostgresMessageReceiver>();
 
+        // Register built-in middleware (unified pipeline for both single and batch)
+        RegisterBuiltInMiddleware(services);
+
+        // Register user-defined global middleware
+        RegisterUserMiddleware(services, configurator);
+
         // Register consumer factory for creating queue consumers
-        services.AddSingleton<QueueConsumerFactory>();
+        services.AddSingleton<QueueConsumerFactory>(provider =>
+        {
+            var scopeFactory = provider.GetRequiredService<IServiceScopeFactory>();
+            var receiver = provider.GetRequiredService<PostgresMessageReceiver>();
+            var loggerFactory = provider.GetRequiredService<ILoggerFactory>();
+
+            return new QueueConsumerFactory(
+                scopeFactory,
+                receiver,
+                loggerFactory,
+                configurator.GlobalMiddleware
+            );
+        });
 
         // Register each processor as scoped service
         foreach (var registration in configurator.ProcessorRegistrations)
         {
             services.AddScoped(registration.ProcessorType);
+        }
+    }
+
+    private static void RegisterBuiltInMiddleware(IServiceCollection services)
+    {
+        // Unified middleware (works for both single-message and batch processing)
+        services.AddScoped<ErrorHandlingMiddleware>();
+        services.AddScoped<LockRenewalMiddleware>();
+        services.AddScoped<DeserializationMiddleware>();
+        services.AddScoped<EnvelopeMiddleware>();
+        services.AddScoped<ProcessorInvocationMiddleware>();
+    }
+
+    private static void RegisterUserMiddleware(
+        IServiceCollection services,
+        BussigRegistrationConfigurator configurator
+    )
+    {
+        // Register global middleware types
+        foreach (var middlewareType in configurator.GlobalMiddleware)
+        {
+            services.AddScoped(middlewareType);
+        }
+
+        // Register per-processor middleware types
+        foreach (var registration in configurator.ProcessorRegistrations)
+        {
+            foreach (var middlewareType in registration.Options.Middleware.MiddlewareTypes)
+            {
+                if (services.All(d => d.ServiceType != middlewareType))
+                {
+                    services.AddScoped(middlewareType);
+                }
+            }
         }
     }
 }

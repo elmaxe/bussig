@@ -1,3 +1,5 @@
+#pragma warning disable CA1861 // Avoid constant arrays as arguments
+
 using System.Globalization;
 using System.Text.Json;
 using Bussig.Configuration;
@@ -194,6 +196,120 @@ public class SqlFunctionTests
     }
 
     [Test]
+    public async Task CompleteMessages_RemovesAllDeliveriesAndMessages()
+    {
+        // Arrange
+        var container = await Containers.GetContainerAsync();
+        var schema = NewSchema();
+        const string queueName = "orders";
+        await using var dataSource = await CreateMigratedDataSourceAsync(
+            container,
+            schema,
+            CancellationToken.None
+        );
+        await using var connection = await dataSource.OpenConnectionAsync();
+
+        await CreateQueueAsync(connection, schema, queueName, 10);
+        var messageId1 = await SendMessageAsync(connection, schema, queueName, null, null, null);
+        var messageId2 = await SendMessageAsync(connection, schema, queueName, null, null, null);
+        var messageId3 = await SendMessageAsync(connection, schema, queueName, null, null, null);
+
+        var lockId = Guid.NewGuid();
+        var fetched1 = await GetMessageAsync(connection, schema, queueName, lockId, TimeSpan.FromSeconds(30));
+        var fetched2 = await GetMessageAsync(connection, schema, queueName, lockId, TimeSpan.FromSeconds(30));
+        var fetched3 = await GetMessageAsync(connection, schema, queueName, lockId, TimeSpan.FromSeconds(30));
+
+        // Act
+        var completeSql = $"""SELECT "{schema}".complete_messages($1, $2);""";
+        var completedCount = await ExecuteScalarLongAsync(
+            connection,
+            completeSql,
+            CancellationToken.None,
+            new NpgsqlParameter<long[]>
+            {
+                TypedValue = [fetched1.DeliveryId, fetched2.DeliveryId, fetched3.DeliveryId],
+            },
+            new NpgsqlParameter<Guid[]> { TypedValue = [lockId, lockId, lockId] }
+        );
+
+        // Assert
+        await using var deliveryCountCommand = new NpgsqlCommand(
+            $"""SELECT COUNT(*) FROM "{schema}".message_delivery WHERE message_id = ANY($1);""",
+            connection
+        );
+        deliveryCountCommand.Parameters.Add(
+            new NpgsqlParameter<Guid[]> { TypedValue = [messageId1, messageId2, messageId3] }
+        );
+        var deliveryCount = Convert.ToInt64(
+            await deliveryCountCommand.ExecuteScalarAsync(),
+            CultureInfo.InvariantCulture
+        );
+
+        await using var messageCountCommand = new NpgsqlCommand(
+            $"""SELECT COUNT(*) FROM "{schema}".messages WHERE message_id = ANY($1);""",
+            connection
+        );
+        messageCountCommand.Parameters.Add(
+            new NpgsqlParameter<Guid[]> { TypedValue = [messageId1, messageId2, messageId3] }
+        );
+        var messageCount = Convert.ToInt64(
+            await messageCountCommand.ExecuteScalarAsync(),
+            CultureInfo.InvariantCulture
+        );
+
+        await Assert.That(completedCount).EqualTo(3);
+        await Assert.That(deliveryCount).EqualTo(0);
+        await Assert.That(messageCount).EqualTo(0);
+    }
+
+    [Test]
+    public async Task CompleteMessages_OnlyCompletesMatchingLocks()
+    {
+        // Arrange
+        var container = await Containers.GetContainerAsync();
+        var schema = NewSchema();
+        const string queueName = "orders";
+        await using var dataSource = await CreateMigratedDataSourceAsync(
+            container,
+            schema,
+            CancellationToken.None
+        );
+        await using var connection = await dataSource.OpenConnectionAsync();
+
+        await CreateQueueAsync(connection, schema, queueName, 10);
+        await SendMessageAsync(connection, schema, queueName, null, null, null);
+        await SendMessageAsync(connection, schema, queueName, null, null, null);
+
+        var lockId1 = Guid.NewGuid();
+        var lockId2 = Guid.NewGuid();
+        var fetched1 = await GetMessageAsync(connection, schema, queueName, lockId1, TimeSpan.FromSeconds(30));
+        var fetched2 = await GetMessageAsync(connection, schema, queueName, lockId2, TimeSpan.FromSeconds(30));
+
+        // Act - try to complete both with wrong lock for message 2
+        var completeSql = $"""SELECT "{schema}".complete_messages($1, $2);""";
+        var completedCount = await ExecuteScalarLongAsync(
+            connection,
+            completeSql,
+            CancellationToken.None,
+            new NpgsqlParameter<long[]> { TypedValue = [fetched1.DeliveryId, fetched2.DeliveryId] },
+            new NpgsqlParameter<Guid[]> { TypedValue = [lockId1, Guid.NewGuid()] } // wrong lock for message 2
+        );
+
+        // Assert - only message 1 should be completed
+        await using var deliveryCountCommand = new NpgsqlCommand(
+            $"""SELECT COUNT(*) FROM "{schema}".message_delivery;""",
+            connection
+        );
+        var deliveryCount = Convert.ToInt64(
+            await deliveryCountCommand.ExecuteScalarAsync(),
+            CultureInfo.InvariantCulture
+        );
+
+        await Assert.That(completedCount).EqualTo(1);
+        await Assert.That(deliveryCount).EqualTo(1);
+    }
+
+    [Test]
     public async Task AbandonMessage_ClearsLockAndSetsHeaders()
     {
         // Arrange
@@ -251,6 +367,139 @@ public class SqlFunctionTests
 
         await Assert.That(lockValue).EqualTo(null);
         await Assert.That(reason).EqualTo("test");
+    }
+
+    [Test]
+    public async Task AbandonMessages_ClearsLocksAndSetsHeaders()
+    {
+        // Arrange
+        var container = await Containers.GetContainerAsync();
+        var schema = NewSchema();
+        const string queueName = "orders";
+        await using var dataSource = await CreateMigratedDataSourceAsync(
+            container,
+            schema,
+            CancellationToken.None
+        );
+        await using var connection = await dataSource.OpenConnectionAsync();
+
+        await CreateQueueAsync(connection, schema, queueName, 10);
+        await SendMessageAsync(connection, schema, queueName, null, null, null);
+        await SendMessageAsync(connection, schema, queueName, null, null, null);
+        await SendMessageAsync(connection, schema, queueName, null, null, null);
+
+        var lockId = Guid.NewGuid();
+        var fetched1 = await GetMessageAsync(connection, schema, queueName, lockId, TimeSpan.FromSeconds(30));
+        var fetched2 = await GetMessageAsync(connection, schema, queueName, lockId, TimeSpan.FromSeconds(30));
+        var fetched3 = await GetMessageAsync(connection, schema, queueName, lockId, TimeSpan.FromSeconds(30));
+
+        var abandonSql = $"""SELECT "{schema}".abandon_messages($1, $2, $3, $4);""";
+
+        // Act
+        var abandonedCount = await ExecuteScalarLongAsync(
+            connection,
+            abandonSql,
+            CancellationToken.None,
+            new NpgsqlParameter<long[]>
+            {
+                TypedValue = [fetched1.DeliveryId, fetched2.DeliveryId, fetched3.DeliveryId],
+            },
+            new NpgsqlParameter<Guid[]> { TypedValue = [lockId, lockId, lockId] },
+            new NpgsqlParameter
+            {
+                Value = new[] { """{"reason":"error1"}""", """{"reason":"error2"}""", """{"reason":"error3"}""" },
+                NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Jsonb,
+            },
+            new NpgsqlParameter<TimeSpan> { TypedValue = TimeSpan.FromSeconds(10) }
+        );
+
+        // Assert
+        await using var checkCommand = new NpgsqlCommand(
+            $"""SELECT message_delivery_id, lock_id, message_delivery_headers->>'reason' FROM "{schema}".message_delivery ORDER BY message_delivery_id;""",
+            connection
+        );
+
+        await using var reader = await checkCommand.ExecuteReaderAsync();
+        var results = new List<(long DeliveryId, Guid? LockId, string Reason)>();
+        while (await reader.ReadAsync())
+        {
+            results.Add((
+                reader.GetInt64(0),
+                reader.IsDBNull(1) ? null : reader.GetGuid(1),
+                reader.GetString(2)
+            ));
+        }
+
+        await Assert.That(abandonedCount).EqualTo(3);
+        await Assert.That(results.Count).EqualTo(3);
+        await Assert.That(results.All(r => r.LockId == null)).IsTrue();
+        await Assert.That(results[0].Reason).EqualTo("error1");
+        await Assert.That(results[1].Reason).EqualTo("error2");
+        await Assert.That(results[2].Reason).EqualTo("error3");
+    }
+
+    [Test]
+    public async Task AbandonMessages_OnlyAbandonsMatchingLocks()
+    {
+        // Arrange
+        var container = await Containers.GetContainerAsync();
+        var schema = NewSchema();
+        const string queueName = "orders";
+        await using var dataSource = await CreateMigratedDataSourceAsync(
+            container,
+            schema,
+            CancellationToken.None
+        );
+        await using var connection = await dataSource.OpenConnectionAsync();
+
+        await CreateQueueAsync(connection, schema, queueName, 10);
+        await SendMessageAsync(connection, schema, queueName, null, null, null);
+        await SendMessageAsync(connection, schema, queueName, null, null, null);
+
+        var lockId1 = Guid.NewGuid();
+        var lockId2 = Guid.NewGuid();
+        var fetched1 = await GetMessageAsync(connection, schema, queueName, lockId1, TimeSpan.FromSeconds(30));
+        var fetched2 = await GetMessageAsync(connection, schema, queueName, lockId2, TimeSpan.FromSeconds(30));
+
+        var abandonSql = $"""SELECT "{schema}".abandon_messages($1, $2, $3, $4);""";
+
+        // Act - try to abandon both with wrong lock for message 2
+        var abandonedCount = await ExecuteScalarLongAsync(
+            connection,
+            abandonSql,
+            CancellationToken.None,
+            new NpgsqlParameter<long[]> { TypedValue = [fetched1.DeliveryId, fetched2.DeliveryId] },
+            new NpgsqlParameter<Guid[]> { TypedValue = [lockId1, Guid.NewGuid()] }, // wrong lock for message 2
+            new NpgsqlParameter
+            {
+                Value = new[] { """{"reason":"error1"}""", """{"reason":"error2"}""" },
+                NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Jsonb,
+            },
+            new NpgsqlParameter<TimeSpan> { TypedValue = TimeSpan.FromSeconds(10) }
+        );
+
+        // Assert - only message 1 should be abandoned
+        await using var checkCommand = new NpgsqlCommand(
+            $"""SELECT message_delivery_id, lock_id FROM "{schema}".message_delivery ORDER BY message_delivery_id;""",
+            connection
+        );
+
+        await using var reader = await checkCommand.ExecuteReaderAsync();
+        var results = new List<(long DeliveryId, Guid? LockId)>();
+        while (await reader.ReadAsync())
+        {
+            results.Add((
+                reader.GetInt64(0),
+                reader.IsDBNull(1) ? null : reader.GetGuid(1)
+            ));
+        }
+
+        await Assert.That(abandonedCount).EqualTo(1);
+        await Assert.That(results.Count).EqualTo(2);
+        // Message 1 should have null lock (abandoned)
+        await Assert.That(results.First(r => r.DeliveryId == fetched1.DeliveryId).LockId).EqualTo(null);
+        // Message 2 should still have its lock (not abandoned)
+        await Assert.That(results.First(r => r.DeliveryId == fetched2.DeliveryId).LockId).EqualTo(lockId2);
     }
 
     [Test]

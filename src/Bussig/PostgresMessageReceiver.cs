@@ -14,7 +14,9 @@ public sealed class PostgresMessageReceiver
     private readonly NpgsqlDataSource _npgsqlDataSource;
     private readonly string _getMessagesSql;
     private readonly string _completeMessageSql;
+    private readonly string _completeMessagesSql;
     private readonly string _abandonMessageSql;
+    private readonly string _abandonMessagesSql;
     private readonly string _deadletterMessageSql;
     private readonly string _renewMessageLockSql;
 
@@ -36,9 +38,19 @@ public sealed class PostgresMessageReceiver
             PsqlStatements.CompleteMessage,
             schema
         );
+        _completeMessagesSql = string.Format(
+            CultureInfo.InvariantCulture,
+            PsqlStatements.CompleteMessages,
+            schema
+        );
         _abandonMessageSql = string.Format(
             CultureInfo.InvariantCulture,
             PsqlStatements.AbandonMessage,
+            schema
+        );
+        _abandonMessagesSql = string.Format(
+            CultureInfo.InvariantCulture,
+            PsqlStatements.AbandonMessages,
             schema
         );
         _deadletterMessageSql = string.Format(
@@ -116,6 +128,24 @@ public sealed class PostgresMessageReceiver
         return result is long;
     }
 
+    public async Task<bool> CompleteAsync(
+        IEnumerable<long> messageDeliveryIds,
+        IEnumerable<Guid> lockIds,
+        CancellationToken cancellationToken
+    )
+    {
+        await using var conn = await _npgsqlDataSource.OpenConnectionAsync(cancellationToken);
+        await using var cmd = new NpgsqlCommand(_completeMessagesSql, conn);
+
+        cmd.Parameters.Add(
+            new NpgsqlParameter<long[]> { TypedValue = messageDeliveryIds.ToArray() }
+        );
+        cmd.Parameters.Add(new NpgsqlParameter<Guid[]> { TypedValue = lockIds.ToArray() });
+
+        var result = await cmd.ExecuteScalarAsync(cancellationToken);
+        return result is long;
+    }
+
     public async Task<bool> AbandonAsync(
         long messageDeliveryId,
         Guid lockId,
@@ -136,6 +166,34 @@ public sealed class PostgresMessageReceiver
 
         var result = await cmd.ExecuteScalarAsync(cancellationToken);
         return result is long;
+    }
+
+    public async Task<long> AbandonAsync(
+        IEnumerable<long> messageDeliveryIds,
+        IEnumerable<Guid> lockIds,
+        IEnumerable<string?> headers,
+        TimeSpan delay,
+        CancellationToken cancellationToken
+    )
+    {
+        await using var conn = await _npgsqlDataSource.OpenConnectionAsync(cancellationToken);
+        await using var cmd = new NpgsqlCommand(_abandonMessagesSql, conn);
+
+        cmd.Parameters.Add(
+            new NpgsqlParameter<long[]> { TypedValue = messageDeliveryIds.ToArray() }
+        );
+        cmd.Parameters.Add(new NpgsqlParameter<Guid[]> { TypedValue = lockIds.ToArray() });
+        cmd.Parameters.Add(
+            new NpgsqlParameter
+            {
+                Value = headers.ToArray(),
+                NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Jsonb,
+            }
+        );
+        cmd.Parameters.Add(new NpgsqlParameter<TimeSpan> { TypedValue = delay });
+
+        var result = await cmd.ExecuteScalarAsync(cancellationToken);
+        return result is long count ? count : 0;
     }
 
     public async Task<bool> DeadletterAsync(

@@ -1,6 +1,7 @@
 using System.Reflection;
 using Bussig.Abstractions;
 using Bussig.Abstractions.Messages;
+using Bussig.Abstractions.Middleware;
 using Bussig.Abstractions.Options;
 using Bussig.Processing;
 
@@ -11,10 +12,16 @@ public class BussigRegistrationConfigurator : IBussigRegistrationConfigurator
     private readonly HashSet<Type> _messages = [];
     private readonly Dictionary<Type, QueueOptions> _queueOptions = new();
     private readonly List<ProcessorRegistration> _processorRegistrations = [];
+    private readonly List<Type> _globalMiddleware = [];
 
     public IReadOnlyCollection<Type> Messages => _messages;
 
     public IReadOnlyList<ProcessorRegistration> ProcessorRegistrations => _processorRegistrations;
+
+    /// <summary>
+    /// Gets the global middleware types for all processors.
+    /// </summary>
+    public IReadOnlyList<Type> GlobalMiddleware => _globalMiddleware;
 
     public void AddMessage<TMessage>(Action<QueueOptions>? configure = null)
     {
@@ -200,5 +207,24 @@ public class BussigRegistrationConfigurator : IBussigRegistrationConfigurator
         options = new QueueOptions();
         _queueOptions[message] = options;
         return options;
+    }
+
+    public void UseMiddleware<TMiddleware>()
+        where TMiddleware : class, IMessageMiddleware
+    {
+        UseMiddleware(typeof(TMiddleware));
+    }
+
+    public void UseMiddleware(Type middlewareType)
+    {
+        if (!typeof(IMessageMiddleware).IsAssignableFrom(middlewareType))
+        {
+            throw new ArgumentException(
+                $"Type {middlewareType.Name} must implement {nameof(IMessageMiddleware)}",
+                nameof(middlewareType)
+            );
+        }
+
+        _globalMiddleware.Add(middlewareType);
     }
 }

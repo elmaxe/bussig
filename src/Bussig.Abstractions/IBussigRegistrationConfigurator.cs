@@ -1,5 +1,6 @@
 using System.Reflection;
 using Bussig.Abstractions.Messages;
+using Bussig.Abstractions.Middleware;
 using Bussig.Abstractions.Options;
 
 namespace Bussig.Abstractions;
@@ -40,4 +41,19 @@ public interface IBussigRegistrationConfigurator
         Assembly assembly,
         Action<ProcessorOptions>? defaultConfigure = null
     );
+
+    /// <summary>
+    /// Adds a global middleware that runs for all processors (both single-message and batch).
+    /// Middleware is executed in the order it is added.
+    /// </summary>
+    /// <typeparam name="TMiddleware">The middleware type implementing IMessageMiddleware.</typeparam>
+    void UseMiddleware<TMiddleware>()
+        where TMiddleware : class, IMessageMiddleware;
+
+    /// <summary>
+    /// Adds a global middleware that runs for all processors (both single-message and batch).
+    /// Middleware is executed in the order it is added.
+    /// </summary>
+    /// <param name="middlewareType">The middleware type implementing IMessageMiddleware.</param>
+    void UseMiddleware(Type middlewareType);
 }

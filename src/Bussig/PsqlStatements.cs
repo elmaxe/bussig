@@ -18,8 +18,14 @@ public static class PsqlStatements
     public static readonly CompositeFormat CompleteMessage = CompositeFormat.Parse(
         """SELECT * FROM "{0}".complete_message($1, $2);"""
     );
+    public static readonly CompositeFormat CompleteMessages = CompositeFormat.Parse(
+        """SELECT * FROM "{0}".complete_messages($1, $2);"""
+    );
     public static readonly CompositeFormat AbandonMessage = CompositeFormat.Parse(
         """SELECT * FROM "{0}".abandon_message($1, $2, $3, $4);"""
+    );
+    public static readonly CompositeFormat AbandonMessages = CompositeFormat.Parse(
+        """SELECT * FROM "{0}".abandon_messages($1, $2, $3, $4);"""
     );
     public static readonly CompositeFormat DeadLetterMessage = CompositeFormat.Parse(
         """SELECT * FROM "{0}".deadletter_message($1, $2, $3, $4);"""

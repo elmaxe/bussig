@@ -1,4 +1,6 @@
 using Bussig.Abstractions;
+using Bussig.Abstractions.Middleware;
+using Bussig.Processing.Middleware;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using SecurityDriven;
@@ -7,38 +9,27 @@ namespace Bussig.Processing.Internal;
 
 /// <summary>
 /// Processing strategy for batch message processing.
+/// Uses a unified middleware pipeline with batch semantics.
 /// </summary>
 internal sealed class BatchMessageStrategy : IMessageProcessingStrategy
 {
-    private readonly ProcessorConfiguration _context;
+    private readonly ProcessorConfiguration _config;
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly PostgresMessageReceiver _receiver;
-    private readonly ProcessorContextFactory _contextFactory;
-    private readonly MessageLockManager _lockManager;
-    private readonly MessageErrorHandler _errorHandler;
-    private readonly RetryDelayCalculator _retryDelayCalculator;
     private readonly ILogger _logger;
     private readonly SemaphoreSlim _concurrencySemaphore;
 
     public BatchMessageStrategy(
-        ProcessorConfiguration context,
+        ProcessorConfiguration config,
         IServiceScopeFactory scopeFactory,
         PostgresMessageReceiver receiver,
-        ProcessorContextFactory contextFactory,
-        MessageLockManager lockManager,
-        MessageErrorHandler errorHandler,
-        RetryDelayCalculator retryDelayCalculator,
         ILogger logger,
         SemaphoreSlim concurrencySemaphore
     )
     {
-        _context = context;
+        _config = config;
         _scopeFactory = scopeFactory;
         _receiver = receiver;
-        _contextFactory = contextFactory;
-        _lockManager = lockManager;
-        _errorHandler = errorHandler;
-        _retryDelayCalculator = retryDelayCalculator;
         _logger = logger;
         _concurrencySemaphore = concurrencySemaphore;
     }
@@ -47,8 +38,8 @@ internal sealed class BatchMessageStrategy : IMessageProcessingStrategy
     {
         _logger.LogInformation(
             "Starting batch consumer for queue {QueueName} with processor {ProcessorType}",
-            _context.QueueName,
-            _context.ProcessorType.Name
+            _config.QueueName,
+            _config.ProcessorType.Name
         );
 
         while (!stoppingToken.IsCancellationRequested)
@@ -79,13 +70,13 @@ internal sealed class BatchMessageStrategy : IMessageProcessingStrategy
                 _logger.LogError(
                     ex,
                     "Error in batch polling for queue {QueueName}, will retry after interval",
-                    _context.QueueName
+                    _config.QueueName
                 );
-                await Task.Delay(_context.Options.Polling.Interval, stoppingToken);
+                await Task.Delay(_config.Options.Polling.Interval, stoppingToken);
             }
         }
 
-        _logger.LogInformation("Batch consumer stopped for queue {QueueName}", _context.QueueName);
+        _logger.LogInformation("Batch consumer stopped for queue {QueueName}", _config.QueueName);
     }
 
     private async Task<List<IncomingMessage>> CollectBatchAsync(CancellationToken stoppingToken)
@@ -95,17 +86,17 @@ internal sealed class BatchMessageStrategy : IMessageProcessingStrategy
         var lockId = FastGuid.NewPostgreSqlGuid();
 
         while (
-            messages.Count < _context.Options.Batch.MessageLimit
+            messages.Count < _config.Options.Batch.MessageLimit
             && !stoppingToken.IsCancellationRequested
         )
         {
-            var remaining = (int)(_context.Options.Batch.MessageLimit - messages.Count);
-            var fetchCount = Math.Min(remaining, _context.Options.Polling.PrefetchCount);
+            var remaining = (int)(_config.Options.Batch.MessageLimit - messages.Count);
+            var fetchCount = Math.Min(remaining, _config.Options.Polling.PrefetchCount);
 
             var fetched = await _receiver.ReceiveAsync(
-                _context.QueueName,
+                _config.QueueName,
                 lockId,
-                _context.Options.Lock.Duration,
+                _config.Options.Lock.Duration,
                 fetchCount,
                 stoppingToken
             );
@@ -114,7 +105,7 @@ internal sealed class BatchMessageStrategy : IMessageProcessingStrategy
 
             // Check if time limit exceeded and we have at least one message
             if (
-                DateTime.UtcNow - batchStartTime >= _context.Options.Batch.TimeLimit
+                DateTime.UtcNow - batchStartTime >= _config.Options.Batch.TimeLimit
                 && messages.Count > 0
             )
             {
@@ -130,7 +121,7 @@ internal sealed class BatchMessageStrategy : IMessageProcessingStrategy
                 }
 
                 // No messages at all, wait before next poll
-                await Task.Delay(_context.Options.Polling.Interval, stoppingToken);
+                await Task.Delay(_config.Options.Polling.Interval, stoppingToken);
             }
         }
 
@@ -145,170 +136,59 @@ internal sealed class BatchMessageStrategy : IMessageProcessingStrategy
         _logger.LogDebug(
             "Processing batch of {Count} messages from queue {QueueName}",
             incomingMessages.Count,
-            _context.QueueName
+            _config.QueueName
         );
 
-        // Start lock renewal for all messages in the batch
-        using var lockRenewalCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
-        var lockRenewalTasks = incomingMessages
-            .Select(m =>
-                _lockManager.RunLockRenewalAsync(
-                    m.MessageDeliveryId,
-                    m.LockId,
-                    lockRenewalCts.Token
-                )
-            )
-            .ToList();
+        await using var scope = _scopeFactory.CreateAsyncScope();
 
-        try
+        // Build the unified message context with the batch
+        var context = new MessageContext
         {
-            await using var scope = _scopeFactory.CreateAsyncScope();
+            Messages = incomingMessages,
+            QueueName = _config.QueueName,
+            ProcessorType = _config.ProcessorType,
+            MessageType = _config.BatchMessageType!, // The inner message type
+            ResponseMessageType = _config.ResponseMessageType,
+            Options = _config.Options,
+            ServiceProvider = scope.ServiceProvider,
+            CancellationToken = stoppingToken,
+            IsBatchProcessor = true,
+            CompleteAllAsync = () => CompleteAllMessagesAsync(incomingMessages),
+            AbandonAllAsync = delay => AbandonAllMessagesAsync(incomingMessages, delay),
+        };
 
-            // Deserialize all messages and create contexts
-            var contexts = new List<object>();
+        // Create and execute the unified middleware pipeline
+        var pipeline = MessageMiddlewarePipeline.CreateDefault(
+            _config.GlobalMiddleware,
+            _config.Options.Middleware.MiddlewareTypes,
+            scope.ServiceProvider
+        );
 
-            foreach (var incomingMessage in incomingMessages)
-            {
-                var messageBody = _contextFactory.DeserializeMessage(
-                    incomingMessage,
-                    _context.BatchMessageType!,
-                    _context.QueueName,
-                    out var errorMessage
-                );
-
-                if (messageBody is null)
-                {
-                    _logger.LogError(
-                        "Failed to deserialize message {MessageId} in batch, sending entire batch to dead letter",
-                        incomingMessage.MessageId
-                    );
-
-                    // Deadletter all messages in the batch
-                    await DeadletterBatchAsync(
-                        incomingMessages,
-                        errorMessage ?? "DeserializationFailed",
-                        messageBody is null && errorMessage?.Contains("null") == true
-                            ? "NullMessage"
-                            : "DeserializationFailed"
-                    );
-                    return;
-                }
-
-                var context = ProcessorContextFactory.CreateContext(
-                    incomingMessage,
-                    messageBody,
-                    _context.BatchMessageType!
-                );
-                contexts.Add(context);
-            }
-
-            // Create the batch using factory
-            var batch = _contextFactory.CreateBatch(contexts, _context.BatchMessageType!);
-
-            // Resolve the processor
-            var processor = scope.ServiceProvider.GetRequiredService(_context.ProcessorType);
-
-            // Invoke ProcessAsync
-            var processMethod = _context.ProcessorType.GetMethod(nameof(IProcessor<>.ProcessAsync));
-            if (processMethod is null)
-            {
-                throw new InvalidOperationException(
-                    $"ProcessAsync method not found on processor {_context.ProcessorType.Name}"
-                );
-            }
-
-            var task = (Task)processMethod.Invoke(processor, [batch, stoppingToken])!;
-            await task;
-
-            // Complete all messages
-            foreach (var message in incomingMessages)
-            {
-                await _receiver.CompleteAsync(
-                    message.MessageDeliveryId,
-                    message.LockId,
-                    CancellationToken.None
-                );
-            }
-
-            _logger.LogDebug(
-                "Successfully processed batch of {Count} messages from queue {QueueName}",
-                incomingMessages.Count,
-                _context.QueueName
-            );
-        }
-        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-        {
-            _logger.LogWarning(
-                "Batch processing cancelled for {Count} messages, abandoning",
-                incomingMessages.Count
-            );
-
-            await AbandonBatchAsync(incomingMessages, TimeSpan.Zero);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(
-                ex,
-                "Error processing batch of {Count} messages from queue {QueueName}",
-                incomingMessages.Count,
-                _context.QueueName
-            );
-
-            // Check if any message has exceeded max delivery count
-            var exceededMax = incomingMessages.Any(m => m.DeliveryCount >= m.MaxDeliveryCount);
-            if (exceededMax)
-            {
-                _logger.LogWarning(
-                    "Batch contains message(s) exceeding max delivery count, sending to dead letter"
-                );
-                await DeadletterBatchAsync(incomingMessages, ex.Message, "MaxRetriesExceeded");
-            }
-            else
-            {
-                // Use the message with the highest delivery count as representative for retry calculation
-                var representativeMessage = incomingMessages.MaxBy(m => m.DeliveryCount)!;
-                await AbandonBatchAsync(
-                    incomingMessages,
-                    _retryDelayCalculator.CalculateDelay(representativeMessage)
-                );
-            }
-        }
-        finally
-        {
-            await lockRenewalCts.CancelAsync();
-            await Task.WhenAll(lockRenewalTasks);
-        }
+        await pipeline.ExecuteAsync(context);
     }
 
-    private async Task DeadletterBatchAsync(
-        List<IncomingMessage> messages,
-        string errorMessage,
-        string errorCode
+    private async Task CompleteAllMessagesAsync(IReadOnlyList<IncomingMessage> messages)
+    {
+        var deliveryIds = messages.Select(m => m.MessageDeliveryId).ToArray();
+        var lockIds = messages.Select(m => m.LockId).ToArray();
+
+        await _receiver.CompleteAsync(deliveryIds, lockIds, CancellationToken.None);
+    }
+
+    private async Task AbandonAllMessagesAsync(
+        IReadOnlyList<IncomingMessage> messages,
+        TimeSpan delay
     )
     {
-        foreach (var message in messages)
-        {
-            await _errorHandler.DeadletterAsync(
-                message,
-                _context.QueueName,
-                errorMessage,
-                errorCode,
-                CancellationToken.None
-            );
-        }
-    }
+        var retryCalculator = new RetryDelayCalculator(_config.Options.Retry);
+        var errorHandler = new MessageErrorHandler(_receiver, retryCalculator, _logger);
 
-    private async Task AbandonBatchAsync(List<IncomingMessage> messages, TimeSpan delay)
-    {
-        foreach (var message in messages)
-        {
-            await _errorHandler.AbandonAsync(
-                message,
-                "Batch processing failed",
-                "BatchProcessingFailed",
-                delay,
-                CancellationToken.None
-            );
-        }
+        await errorHandler.AbandonAsync(
+            messages,
+            "Batch processing failed",
+            "BatchProcessingFailed",
+            delay,
+            CancellationToken.None
+        );
     }
 }

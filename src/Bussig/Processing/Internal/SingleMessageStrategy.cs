@@ -1,53 +1,35 @@
-using System.Reflection;
 using Bussig.Abstractions;
-using Bussig.Abstractions.Messages;
+using Bussig.Abstractions.Middleware;
+using Bussig.Processing.Middleware;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using Npgsql;
 using SecurityDriven;
 
 namespace Bussig.Processing.Internal;
 
 /// <summary>
 /// Processing strategy for single message (non-batch) processing.
+/// Uses a unified middleware pipeline with batch of 1 semantics.
 /// </summary>
 internal sealed class SingleMessageStrategy : IMessageProcessingStrategy
 {
-    private readonly ProcessorConfiguration _context;
+    private readonly ProcessorConfiguration _config;
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly PostgresMessageReceiver _receiver;
-    private readonly ProcessorContextFactory _contextFactory;
-    private readonly MessageLockManager _lockManager;
-    private readonly MessageErrorHandler _errorHandler;
-    private readonly NpgsqlDataSource _npgsqlDataSource;
-    private readonly IPostgresTransactionAccessor _transactionAccessor;
-    private readonly IBus _bus;
     private readonly ILogger _logger;
     private readonly SemaphoreSlim _concurrencySemaphore;
 
     public SingleMessageStrategy(
-        ProcessorConfiguration context,
+        ProcessorConfiguration config,
         IServiceScopeFactory scopeFactory,
         PostgresMessageReceiver receiver,
-        ProcessorContextFactory contextFactory,
-        MessageLockManager lockManager,
-        MessageErrorHandler errorHandler,
-        NpgsqlDataSource npgsqlDataSource,
-        IPostgresTransactionAccessor transactionAccessor,
-        IBus bus,
         ILogger logger,
         SemaphoreSlim concurrencySemaphore
     )
     {
-        _context = context;
+        _config = config;
         _scopeFactory = scopeFactory;
         _receiver = receiver;
-        _contextFactory = contextFactory;
-        _lockManager = lockManager;
-        _errorHandler = errorHandler;
-        _npgsqlDataSource = npgsqlDataSource;
-        _transactionAccessor = transactionAccessor;
-        _bus = bus;
         _logger = logger;
         _concurrencySemaphore = concurrencySemaphore;
     }
@@ -56,8 +38,8 @@ internal sealed class SingleMessageStrategy : IMessageProcessingStrategy
     {
         _logger.LogInformation(
             "Starting consumer for queue {QueueName} with processor {ProcessorType}",
-            _context.QueueName,
-            _context.ProcessorType.Name
+            _config.QueueName,
+            _config.ProcessorType.Name
         );
 
         var processingTasks = new List<Task>();
@@ -70,9 +52,8 @@ internal sealed class SingleMessageStrategy : IMessageProcessingStrategy
                 processingTasks.RemoveAll(t => t.IsCompleted);
 
                 // Calculate how many messages we can fetch
-                var availableSlots =
-                    _context.Options.Polling.MaxConcurrency - processingTasks.Count;
-                var fetchCount = Math.Min(availableSlots, _context.Options.Polling.PrefetchCount);
+                var availableSlots = _config.Options.Polling.MaxConcurrency - processingTasks.Count;
+                var fetchCount = Math.Min(availableSlots, _config.Options.Polling.PrefetchCount);
 
                 if (fetchCount <= 0)
                 {
@@ -84,16 +65,16 @@ internal sealed class SingleMessageStrategy : IMessageProcessingStrategy
 
                 var lockId = FastGuid.NewPostgreSqlGuid();
                 var messages = await _receiver.ReceiveAsync(
-                    _context.QueueName,
+                    _config.QueueName,
                     lockId,
-                    _context.Options.Lock.Duration,
+                    _config.Options.Lock.Duration,
                     fetchCount,
                     stoppingToken
                 );
 
                 if (messages.Count == 0)
                 {
-                    await Task.Delay(_context.Options.Polling.Interval, stoppingToken);
+                    await Task.Delay(_config.Options.Polling.Interval, stoppingToken);
                     continue;
                 }
 
@@ -114,9 +95,9 @@ internal sealed class SingleMessageStrategy : IMessageProcessingStrategy
                 _logger.LogError(
                     ex,
                     "Error polling queue {QueueName}, will retry after interval",
-                    _context.QueueName
+                    _config.QueueName
                 );
-                await Task.Delay(_context.Options.Polling.Interval, stoppingToken);
+                await Task.Delay(_config.Options.Polling.Interval, stoppingToken);
             }
         }
 
@@ -126,13 +107,13 @@ internal sealed class SingleMessageStrategy : IMessageProcessingStrategy
             _logger.LogInformation(
                 "Waiting for {Count} in-flight messages to complete for queue {QueueName}",
                 processingTasks.Count,
-                _context.QueueName
+                _config.QueueName
             );
 
             await Task.WhenAll(processingTasks);
         }
 
-        _logger.LogInformation("Consumer stopped for queue {QueueName}", _context.QueueName);
+        _logger.LogInformation("Consumer stopped for queue {QueueName}", _config.QueueName);
     }
 
     private async Task ProcessMessageAsync(
@@ -140,187 +121,61 @@ internal sealed class SingleMessageStrategy : IMessageProcessingStrategy
         CancellationToken stoppingToken
     )
     {
-        using var lockRenewalCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
-        var lockRenewalTask = _lockManager.RunLockRenewalAsync(
-            incomingMessage.MessageDeliveryId,
-            incomingMessage.LockId,
-            lockRenewalCts.Token
-        );
-
         try
         {
             await using var scope = _scopeFactory.CreateAsyncScope();
 
-            // Deserialize the message
-            var messageBody = _contextFactory.DeserializeMessage(
-                incomingMessage,
-                _context.MessageType,
-                _context.QueueName,
-                out var errorMessage
-            );
-
-            if (messageBody is null)
+            // Build the unified message context with batch of 1
+            var context = new MessageContext
             {
-                await _errorHandler.DeadletterAsync(
-                    incomingMessage,
-                    _context.QueueName,
-                    errorMessage ?? "Unknown deserialization error",
-                    messageBody is null && errorMessage?.Contains("null") == true
-                        ? "NullMessage"
-                        : "DeserializationFailed",
-                    CancellationToken.None
-                );
-                return;
-            }
+                Messages = [incomingMessage],
+                QueueName = _config.QueueName,
+                ProcessorType = _config.ProcessorType,
+                MessageType = _config.MessageType,
+                ResponseMessageType = _config.ResponseMessageType,
+                Options = _config.Options,
+                ServiceProvider = scope.ServiceProvider,
+                CancellationToken = stoppingToken,
+                IsBatchProcessor = false,
+                CompleteAllAsync = () => CompleteMessageAsync(incomingMessage),
+                AbandonAllAsync = delay => AbandonMessageAsync(incomingMessage, delay),
+            };
 
-            // Resolve the processor
-            var processor = scope.ServiceProvider.GetRequiredService(_context.ProcessorType);
-
-            // Build context using factory
-            var context = ProcessorContextFactory.CreateContext(
-                incomingMessage,
-                messageBody,
-                _context.MessageType
+            // Create and execute the middleware pipeline
+            var pipeline = MessageMiddlewarePipeline.CreateDefault(
+                _config.GlobalMiddleware,
+                _config.Options.Middleware.MiddlewareTypes,
+                scope.ServiceProvider
             );
 
-            // Invoke ProcessAsync using reflection
-            var processMethod = _context.ProcessorType.GetMethod(
-                nameof(IProcessor<object>.ProcessAsync)
-            );
-            if (processMethod is null)
-            {
-                throw new InvalidOperationException(
-                    $"ProcessAsync method not found on processor {_context.ProcessorType.Name}"
-                );
-            }
-
-            if (_context.ResponseMessageType is not null)
-            {
-                // Request-reply processor with transactional outbox
-                await ProcessWithOutboxAsync(
-                    processor,
-                    processMethod,
-                    context,
-                    incomingMessage,
-                    stoppingToken
-                );
-            }
-            else
-            {
-                // Fire-and-forget processor
-                var task = (Task)processMethod.Invoke(processor, [context, stoppingToken])!;
-                await task;
-
-                // Complete the message
-                await _receiver.CompleteAsync(
-                    incomingMessage.MessageDeliveryId,
-                    incomingMessage.LockId,
-                    CancellationToken.None
-                );
-            }
-
-            _logger.LogDebug(
-                "Successfully processed message {MessageId} from queue {QueueName}",
-                incomingMessage.MessageId,
-                _context.QueueName
-            );
-        }
-        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-        {
-            // Abandon the message when shutting down so it can be reprocessed
-            _logger.LogWarning(
-                "Processing cancelled for message {MessageId}, abandoning",
-                incomingMessage.MessageId
-            );
-
-            await _errorHandler.AbandonWithoutErrorAsync(incomingMessage, CancellationToken.None);
-        }
-        catch (Exception ex)
-        {
-            await _errorHandler.HandleErrorAsync(
-                incomingMessage,
-                _context.QueueName,
-                ex,
-                CancellationToken.None
-            );
+            await pipeline.ExecuteAsync(context);
         }
         finally
         {
-            await lockRenewalCts.CancelAsync();
-
-            try
-            {
-                await lockRenewalTask;
-            }
-            catch (OperationCanceledException)
-            {
-                // Expected
-            }
-
             _concurrencySemaphore.Release();
         }
     }
 
-    private async Task ProcessWithOutboxAsync(
-        object processor,
-        MethodInfo processMethod,
-        object context,
-        IncomingMessage incomingMessage,
-        CancellationToken stoppingToken
-    )
+    private async Task CompleteMessageAsync(IncomingMessage message)
     {
-        await using var conn = await _npgsqlDataSource.OpenConnectionAsync(stoppingToken);
-        await using var transaction = await conn.BeginTransactionAsync(stoppingToken);
+        await _receiver.CompleteAsync(
+            [message.MessageDeliveryId],
+            [message.LockId],
+            CancellationToken.None
+        );
+    }
 
-        using var _ = _transactionAccessor.Use(transaction);
+    private async Task AbandonMessageAsync(IncomingMessage message, TimeSpan delay)
+    {
+        var retryCalculator = new RetryDelayCalculator(_config.Options.Retry);
+        var errorHandler = new MessageErrorHandler(_receiver, retryCalculator, _logger);
 
-        try
-        {
-            // Invoke ProcessAsync - returns Task<TSend>
-            var task = (Task)processMethod.Invoke(processor, [context, stoppingToken])!;
-            await task;
-
-            // Get the result using reflection (task is Task<TSend>)
-            var resultProperty = task.GetType().GetProperty("Result");
-            var responseMessage = resultProperty?.GetValue(task);
-
-            // Send response message within transaction if not null
-            if (responseMessage is not null && responseMessage is IMessage)
-            {
-                // Use reflection to call IBus.SendAsync<TMessage>
-                var sendMethod = typeof(IBus)
-                    .GetMethods()
-                    .First(m =>
-                        m.Name == nameof(IBus.SendAsync)
-                        && m.GetParameters().Length == 2
-                        && m.GetParameters()[1].ParameterType == typeof(CancellationToken)
-                    );
-                var genericSendMethod = sendMethod.MakeGenericMethod(_context.ResponseMessageType!);
-
-                await (Task)genericSendMethod.Invoke(_bus, [responseMessage, stoppingToken])!;
-
-                _logger.LogDebug(
-                    "Sent response message of type {ResponseType} for message {MessageId}",
-                    _context.ResponseMessageType!.Name,
-                    incomingMessage.MessageId
-                );
-            }
-
-            // Complete message within transaction
-            await _receiver.CompleteWithinTransactionAsync(
-                conn,
-                transaction,
-                incomingMessage.MessageDeliveryId,
-                incomingMessage.LockId,
-                stoppingToken
-            );
-
-            await transaction.CommitAsync(stoppingToken);
-        }
-        catch
-        {
-            await transaction.RollbackAsync(CancellationToken.None);
-            throw;
-        }
+        await errorHandler.AbandonAsync(
+            message,
+            "Processing failed",
+            "ProcessingFailed",
+            delay,
+            CancellationToken.None
+        );
     }
 }
