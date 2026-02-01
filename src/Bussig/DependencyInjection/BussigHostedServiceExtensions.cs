@@ -4,6 +4,7 @@ using Bussig.Constants;
 using Bussig.Hosting;
 using Bussig.Processing;
 using Bussig.Processing.Middleware;
+using Bussig.Sending;
 using Bussig.Serialization;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -16,11 +17,11 @@ public static class BussigHostedServiceExtensions
 {
     public static IServiceCollection AddBussig(
         this IServiceCollection services,
-        Action<IBussigRegistrationConfigurator>? options = null
+        Action<IBussigRegistrationConfigurator, IServiceCollection>? options = null
     )
     {
         var configurator = new BussigRegistrationConfigurator();
-        options?.Invoke(configurator);
+        options?.Invoke(configurator, services);
 
         services.AddBussigCore(configurator);
 
@@ -64,15 +65,30 @@ public static class BussigHostedServiceExtensions
         services.AddSingleton<PostgresQueueCreator>();
         services.AddSingleton<IOutgoingMessageSender, PostgresOutgoingMessageSender>();
         services.AddSingleton<IBus, Bus>();
+        // services.AddSingleton<IMessageAttachmentRepository, InMemoryMessageAttachmentRepository>();
 
         // Register message receiver for consuming messages
         services.AddSingleton<PostgresMessageReceiver>();
 
         // Register built-in middleware (unified pipeline for both single and batch)
-        RegisterBuiltInMiddleware(services);
+        RegisterBuiltInMiddleware(services, configurator.AttachmentsEnabled);
 
         // Register user-defined global middleware
         RegisterUserMiddleware(services, configurator);
+
+        // Register built-in outgoing middleware
+        RegisterBuiltInOutgoingMiddleware(services, configurator.AttachmentsEnabled);
+
+        // Register user-defined outgoing middleware
+        RegisterUserOutgoingMiddleware(services, configurator);
+
+        // Register the outgoing message pipeline
+        services.AddSingleton(provider =>
+            OutgoingMessageMiddlewarePipeline.CreateDefault(
+                configurator.GlobalSendMiddleware,
+                configurator.AttachmentsEnabled
+            )
+        );
 
         // Register consumer factory for creating queue consumers
         services.AddSingleton<QueueConsumerFactory>(provider =>
@@ -85,7 +101,8 @@ public static class BussigHostedServiceExtensions
                 scopeFactory,
                 receiver,
                 loggerFactory,
-                configurator.GlobalMiddleware
+                configurator.GlobalMiddleware,
+                configurator.AttachmentsEnabled
             );
         });
 
@@ -96,13 +113,20 @@ public static class BussigHostedServiceExtensions
         }
     }
 
-    private static void RegisterBuiltInMiddleware(IServiceCollection services)
+    private static void RegisterBuiltInMiddleware(
+        IServiceCollection services,
+        bool attachmentsEnabled
+    )
     {
         // Unified middleware (works for both single-message and batch processing)
         services.AddScoped<ErrorHandlingMiddleware>();
         services.AddScoped<LockRenewalMiddleware>();
         services.AddScoped<DeserializationMiddleware>();
         services.AddScoped<EnvelopeMiddleware>();
+        if (attachmentsEnabled)
+        {
+            services.AddScoped<AttachmentMiddleware>();
+        }
         services.AddScoped<ProcessorInvocationMiddleware>();
     }
 
@@ -126,6 +150,33 @@ public static class BussigHostedServiceExtensions
                 {
                     services.AddScoped(middlewareType);
                 }
+            }
+        }
+    }
+
+    private static void RegisterBuiltInOutgoingMiddleware(
+        IServiceCollection services,
+        bool attachmentsEnabled
+    )
+    {
+        if (attachmentsEnabled)
+        {
+            services.AddScoped<OutgoingAttachmentMiddleware>();
+        }
+        services.AddScoped<OutgoingSerializationMiddleware>();
+        services.AddScoped<OutgoingSenderMiddleware>();
+    }
+
+    private static void RegisterUserOutgoingMiddleware(
+        IServiceCollection services,
+        BussigRegistrationConfigurator configurator
+    )
+    {
+        foreach (var middlewareType in configurator.GlobalSendMiddleware)
+        {
+            if (services.All(d => d.ServiceType != middlewareType))
+            {
+                services.AddScoped(middlewareType);
             }
         }
     }

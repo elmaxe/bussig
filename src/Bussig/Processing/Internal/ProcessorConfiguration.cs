@@ -18,4 +18,9 @@ internal sealed record ProcessorConfiguration
     /// Global middleware types to run for all processors (both single-message and batch).
     /// </summary>
     public IReadOnlyList<Type> GlobalMiddleware { get; init; } = [];
+
+    /// <summary>
+    /// Whether attachments are enabled.
+    /// </summary>
+    public bool AttachmentsEnabled { get; init; }
 }

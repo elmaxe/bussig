@@ -79,6 +79,7 @@ internal sealed class MessageMiddlewarePipeline
     public static MessageMiddlewarePipeline CreateDefault(
         IReadOnlyList<Type> globalMiddleware,
         IReadOnlyList<Type> processorMiddleware,
+        bool attachmentsEnabled,
         IServiceProvider serviceProvider
     )
     {
@@ -91,7 +92,8 @@ internal sealed class MessageMiddlewarePipeline
         // 4. Per-processor user middleware
         // 5. DeserializationMiddleware
         // 6. EnvelopeMiddleware
-        // 7. ProcessorInvocationMiddleware (terminal)
+        // 7. AttachmentMiddleware (optional - downloads attachments)
+        // 8. ProcessorInvocationMiddleware (terminal)
 
         allMiddleware.Add(typeof(ErrorHandlingMiddleware));
         allMiddleware.Add(typeof(LockRenewalMiddleware));
@@ -99,6 +101,10 @@ internal sealed class MessageMiddlewarePipeline
         allMiddleware.AddRange(processorMiddleware);
         allMiddleware.Add(typeof(DeserializationMiddleware));
         allMiddleware.Add(typeof(EnvelopeMiddleware));
+        if (attachmentsEnabled)
+        {
+            allMiddleware.Add(typeof(AttachmentMiddleware));
+        }
         allMiddleware.Add(typeof(ProcessorInvocationMiddleware));
 
         return new MessageMiddlewarePipeline(allMiddleware, serviceProvider);

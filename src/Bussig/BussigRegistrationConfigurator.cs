@@ -13,6 +13,7 @@ public class BussigRegistrationConfigurator : IBussigRegistrationConfigurator
     private readonly Dictionary<Type, QueueOptions> _queueOptions = new();
     private readonly List<ProcessorRegistration> _processorRegistrations = [];
     private readonly List<Type> _globalMiddleware = [];
+    private readonly List<Type> _globalSendMiddleware = [];
 
     public IReadOnlyCollection<Type> Messages => _messages;
 
@@ -22,6 +23,16 @@ public class BussigRegistrationConfigurator : IBussigRegistrationConfigurator
     /// Gets the global middleware types for all processors.
     /// </summary>
     public IReadOnlyList<Type> GlobalMiddleware => _globalMiddleware;
+
+    /// <summary>
+    /// Gets the global middleware types for outgoing messages.
+    /// </summary>
+    public IReadOnlyList<Type> GlobalSendMiddleware => _globalSendMiddleware;
+
+    /// <summary>
+    /// Gets whether attachments are enabled.
+    /// </summary>
+    public bool AttachmentsEnabled { get; internal set; }
 
     public void AddMessage<TMessage>(Action<QueueOptions>? configure = null)
     {
@@ -226,5 +237,24 @@ public class BussigRegistrationConfigurator : IBussigRegistrationConfigurator
         }
 
         _globalMiddleware.Add(middlewareType);
+    }
+
+    public void UseSendMiddleware<TMiddleware>()
+        where TMiddleware : class, IOutgoingMessageMiddleware
+    {
+        UseSendMiddleware(typeof(TMiddleware));
+    }
+
+    public void UseSendMiddleware(Type middlewareType)
+    {
+        if (!typeof(IOutgoingMessageMiddleware).IsAssignableFrom(middlewareType))
+        {
+            throw new ArgumentException(
+                $"Type {middlewareType.Name} must implement {nameof(IOutgoingMessageMiddleware)}",
+                nameof(middlewareType)
+            );
+        }
+
+        _globalSendMiddleware.Add(middlewareType);
     }
 }

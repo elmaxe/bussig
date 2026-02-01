@@ -13,6 +13,7 @@
     <Project Path="src/Bussig.Tests.Unit/Bussig.Tests.Unit.csproj" />
   </Folder>
   <Project Path="src/Bussig.Abstractions/Bussig.Abstractions.csproj" />
+  <Project Path="src/Bussig.Azure.Storage/Bussig.Azure.Storage.csproj" />
   <Project Path="src/Bussig/Bussig.csproj" />
   <Project Path="src/examples/Playground/Playground.csproj" />
 </Solution>

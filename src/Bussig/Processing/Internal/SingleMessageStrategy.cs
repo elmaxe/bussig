@@ -145,6 +145,7 @@ internal sealed class SingleMessageStrategy : IMessageProcessingStrategy
             var pipeline = MessageMiddlewarePipeline.CreateDefault(
                 _config.GlobalMiddleware,
                 _config.Options.Middleware.MiddlewareTypes,
+                _config.AttachmentsEnabled,
                 scope.ServiceProvider
             );
 

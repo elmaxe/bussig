@@ -215,9 +215,27 @@ public class SqlFunctionTests
         var messageId3 = await SendMessageAsync(connection, schema, queueName, null, null, null);
 
         var lockId = Guid.NewGuid();
-        var fetched1 = await GetMessageAsync(connection, schema, queueName, lockId, TimeSpan.FromSeconds(30));
-        var fetched2 = await GetMessageAsync(connection, schema, queueName, lockId, TimeSpan.FromSeconds(30));
-        var fetched3 = await GetMessageAsync(connection, schema, queueName, lockId, TimeSpan.FromSeconds(30));
+        var fetched1 = await GetMessageAsync(
+            connection,
+            schema,
+            queueName,
+            lockId,
+            TimeSpan.FromSeconds(30)
+        );
+        var fetched2 = await GetMessageAsync(
+            connection,
+            schema,
+            queueName,
+            lockId,
+            TimeSpan.FromSeconds(30)
+        );
+        var fetched3 = await GetMessageAsync(
+            connection,
+            schema,
+            queueName,
+            lockId,
+            TimeSpan.FromSeconds(30)
+        );
 
         // Act
         var completeSql = $"""SELECT "{schema}".complete_messages($1, $2);""";
@@ -282,8 +300,20 @@ public class SqlFunctionTests
 
         var lockId1 = Guid.NewGuid();
         var lockId2 = Guid.NewGuid();
-        var fetched1 = await GetMessageAsync(connection, schema, queueName, lockId1, TimeSpan.FromSeconds(30));
-        var fetched2 = await GetMessageAsync(connection, schema, queueName, lockId2, TimeSpan.FromSeconds(30));
+        var fetched1 = await GetMessageAsync(
+            connection,
+            schema,
+            queueName,
+            lockId1,
+            TimeSpan.FromSeconds(30)
+        );
+        var fetched2 = await GetMessageAsync(
+            connection,
+            schema,
+            queueName,
+            lockId2,
+            TimeSpan.FromSeconds(30)
+        );
 
         // Act - try to complete both with wrong lock for message 2
         var completeSql = $"""SELECT "{schema}".complete_messages($1, $2);""";
@@ -389,9 +419,27 @@ public class SqlFunctionTests
         await SendMessageAsync(connection, schema, queueName, null, null, null);
 
         var lockId = Guid.NewGuid();
-        var fetched1 = await GetMessageAsync(connection, schema, queueName, lockId, TimeSpan.FromSeconds(30));
-        var fetched2 = await GetMessageAsync(connection, schema, queueName, lockId, TimeSpan.FromSeconds(30));
-        var fetched3 = await GetMessageAsync(connection, schema, queueName, lockId, TimeSpan.FromSeconds(30));
+        var fetched1 = await GetMessageAsync(
+            connection,
+            schema,
+            queueName,
+            lockId,
+            TimeSpan.FromSeconds(30)
+        );
+        var fetched2 = await GetMessageAsync(
+            connection,
+            schema,
+            queueName,
+            lockId,
+            TimeSpan.FromSeconds(30)
+        );
+        var fetched3 = await GetMessageAsync(
+            connection,
+            schema,
+            queueName,
+            lockId,
+            TimeSpan.FromSeconds(30)
+        );
 
         var abandonSql = $"""SELECT "{schema}".abandon_messages($1, $2, $3, $4);""";
 
@@ -407,7 +455,12 @@ public class SqlFunctionTests
             new NpgsqlParameter<Guid[]> { TypedValue = [lockId, lockId, lockId] },
             new NpgsqlParameter
             {
-                Value = new[] { """{"reason":"error1"}""", """{"reason":"error2"}""", """{"reason":"error3"}""" },
+                Value = new[]
+                {
+                    """{"reason":"error1"}""",
+                    """{"reason":"error2"}""",
+                    """{"reason":"error3"}""",
+                },
                 NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Jsonb,
             },
             new NpgsqlParameter<TimeSpan> { TypedValue = TimeSpan.FromSeconds(10) }
@@ -423,11 +476,13 @@ public class SqlFunctionTests
         var results = new List<(long DeliveryId, Guid? LockId, string Reason)>();
         while (await reader.ReadAsync())
         {
-            results.Add((
-                reader.GetInt64(0),
-                reader.IsDBNull(1) ? null : reader.GetGuid(1),
-                reader.GetString(2)
-            ));
+            results.Add(
+                (
+                    reader.GetInt64(0),
+                    reader.IsDBNull(1) ? null : reader.GetGuid(1),
+                    reader.GetString(2)
+                )
+            );
         }
 
         await Assert.That(abandonedCount).EqualTo(3);
@@ -458,8 +513,20 @@ public class SqlFunctionTests
 
         var lockId1 = Guid.NewGuid();
         var lockId2 = Guid.NewGuid();
-        var fetched1 = await GetMessageAsync(connection, schema, queueName, lockId1, TimeSpan.FromSeconds(30));
-        var fetched2 = await GetMessageAsync(connection, schema, queueName, lockId2, TimeSpan.FromSeconds(30));
+        var fetched1 = await GetMessageAsync(
+            connection,
+            schema,
+            queueName,
+            lockId1,
+            TimeSpan.FromSeconds(30)
+        );
+        var fetched2 = await GetMessageAsync(
+            connection,
+            schema,
+            queueName,
+            lockId2,
+            TimeSpan.FromSeconds(30)
+        );
 
         var abandonSql = $"""SELECT "{schema}".abandon_messages($1, $2, $3, $4);""";
 
@@ -488,18 +555,19 @@ public class SqlFunctionTests
         var results = new List<(long DeliveryId, Guid? LockId)>();
         while (await reader.ReadAsync())
         {
-            results.Add((
-                reader.GetInt64(0),
-                reader.IsDBNull(1) ? null : reader.GetGuid(1)
-            ));
+            results.Add((reader.GetInt64(0), reader.IsDBNull(1) ? null : reader.GetGuid(1)));
         }
 
         await Assert.That(abandonedCount).EqualTo(1);
         await Assert.That(results.Count).EqualTo(2);
         // Message 1 should have null lock (abandoned)
-        await Assert.That(results.First(r => r.DeliveryId == fetched1.DeliveryId).LockId).EqualTo(null);
+        await Assert
+            .That(results.First(r => r.DeliveryId == fetched1.DeliveryId).LockId)
+            .EqualTo(null);
         // Message 2 should still have its lock (not abandoned)
-        await Assert.That(results.First(r => r.DeliveryId == fetched2.DeliveryId).LockId).EqualTo(lockId2);
+        await Assert
+            .That(results.First(r => r.DeliveryId == fetched2.DeliveryId).LockId)
+            .EqualTo(lockId2);
     }
 
     [Test]

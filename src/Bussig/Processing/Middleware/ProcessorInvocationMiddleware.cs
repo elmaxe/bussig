@@ -86,7 +86,7 @@ internal sealed class ProcessorInvocationMiddleware : IMessageMiddleware
         else
         {
             // Fire-and-forget processor - call for each message
-            await ProcessSingleMessagesAsync(processor, processMethod, contexts, context);
+            await ProcessSingleMessagesAsync(processor, processMethod, contexts[0], context);
         }
 
         // All succeeded - complete atomically
@@ -122,17 +122,13 @@ internal sealed class ProcessorInvocationMiddleware : IMessageMiddleware
     private static async Task ProcessSingleMessagesAsync(
         object processor,
         MethodInfo processMethod,
-        List<object> contexts,
+        object processorContext,
         MessageContext context
     )
     {
-        // Call processor for each message sequentially
-        foreach (var processorContext in contexts)
-        {
-            var task = (Task)
-                processMethod.Invoke(processor, [processorContext, context.CancellationToken])!;
-            await task;
-        }
+        var task = (Task)
+            processMethod.Invoke(processor, [processorContext, context.CancellationToken])!;
+        await task;
     }
 
     private async Task ProcessWithOutboxAsync(

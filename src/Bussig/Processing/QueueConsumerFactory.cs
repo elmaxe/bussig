@@ -13,18 +13,21 @@ public sealed class QueueConsumerFactory
     private readonly PostgresMessageReceiver _receiver;
     private readonly ILoggerFactory _loggerFactory;
     private readonly IReadOnlyList<Type> _globalMiddleware;
+    private readonly bool _attachmentsEnabled;
 
     public QueueConsumerFactory(
         IServiceScopeFactory scopeFactory,
         PostgresMessageReceiver receiver,
         ILoggerFactory loggerFactory,
-        IReadOnlyList<Type> globalMiddleware
+        IReadOnlyList<Type> globalMiddleware,
+        bool attachmentsEnabled
     )
     {
         _scopeFactory = scopeFactory;
         _receiver = receiver;
         _loggerFactory = loggerFactory;
         _globalMiddleware = globalMiddleware;
+        _attachmentsEnabled = attachmentsEnabled;
     }
 
     public QueueConsumer Create(ProcessorRegistration registration)
@@ -40,6 +43,7 @@ public sealed class QueueConsumerFactory
             BatchMessageType = registration.BatchMessageType,
             Options = registration.Options,
             GlobalMiddleware = _globalMiddleware,
+            AttachmentsEnabled = _attachmentsEnabled,
         };
 
         var concurrencySemaphore = new SemaphoreSlim(

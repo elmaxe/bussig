@@ -56,4 +56,19 @@ public interface IBussigRegistrationConfigurator
     /// </summary>
     /// <param name="middlewareType">The middleware type implementing IMessageMiddleware.</param>
     void UseMiddleware(Type middlewareType);
+
+    /// <summary>
+    /// Adds a global middleware that runs for all outgoing messages.
+    /// Middleware is executed in the order it is added.
+    /// </summary>
+    /// <typeparam name="TMiddleware">The middleware type implementing IOutgoingMessageMiddleware.</typeparam>
+    void UseSendMiddleware<TMiddleware>()
+        where TMiddleware : class, IOutgoingMessageMiddleware;
+
+    /// <summary>
+    /// Adds a global middleware that runs for all outgoing messages.
+    /// Middleware is executed in the order it is added.
+    /// </summary>
+    /// <param name="middlewareType">The middleware type implementing IOutgoingMessageMiddleware.</param>
+    void UseSendMiddleware(Type middlewareType);
 }
