@@ -1,4 +1,4 @@
-namespace Bussig.Abstractions;
+namespace Bussig.Abstractions.Options;
 
 public enum RetryStrategy
 {

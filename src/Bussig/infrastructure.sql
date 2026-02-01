@@ -18,7 +18,7 @@ $$ LANGUAGE plpgsql;
 CREATE SEQUENCE IF NOT EXISTS "{0}".topology_seq AS BIGINT;
 
 CREATE TABLE IF NOT EXISTS "{0}".queues(
-                                           queue_id                BIGINT          NOT NULL PRIMARY KEY DEFAULT nextval('"{0}".topology_seq')
+        queue_id                BIGINT          NOT NULL PRIMARY KEY DEFAULT nextval('"{0}".topology_seq')
     ,   name                    TEXT            NOT NULL
     ,   type                    SMALLINT        NOT NULL -- 1=Main, 2=DLQ
     ,   max_delivery_count      INTEGER         NOT NULL DEFAULT 3
@@ -28,7 +28,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS queues_idx_name_type ON "{0}".queues (name, ty
 SELECT "{0}".add_constraint_if_not_exists('queues', 'unique_queue', 'ALTER TABLE "{0}".queues ADD CONSTRAINT unique_queue UNIQUE USING INDEX queues_idx_name_type;');
 
 CREATE TABLE IF NOT EXISTS "{0}".messages (
-                                              message_id              UUID            NOT NULL PRIMARY KEY
+        message_id              UUID            NOT NULL PRIMARY KEY
     ,   body                    BYTEA           NULL
     ,   headers                 JSONB           NULL
     ,   message_version         INTEGER         NOT NULL DEFAULT 0
@@ -38,7 +38,7 @@ CREATE TABLE IF NOT EXISTS "{0}".messages (
 CREATE INDEX IF NOT EXISTS messages_idx_schedule_token ON "{0}".messages (scheduling_token_id) WHERE messages.scheduling_token_id IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS "{0}".message_delivery (
-                                                      message_delivery_id         BIGINT          PRIMARY KEY GENERATED ALWAYS AS IDENTITY
+        message_delivery_id         BIGINT          PRIMARY KEY GENERATED ALWAYS AS IDENTITY
     ,   message_id                  UUID            NOT NULL REFERENCES "{0}".messages(message_id) ON DELETE CASCADE
     ,   queue_id                    BIGINT          NOT NULL REFERENCES "{0}".queues(queue_id)
     ,   lock_id                     UUID            NULL
@@ -57,7 +57,7 @@ CREATE INDEX IF NOT EXISTS message_delivery_idx_fetch ON "{0}".message_delivery 
 CREATE INDEX IF NOT EXISTS message_delivery_idx_message_id ON "{0}".message_delivery (message_id);
 
 CREATE TABLE IF NOT EXISTS "{0}".distributed_locks (
-                                                       lock_id             TEXT            PRIMARY KEY NOT NULL
+        lock_id             TEXT            PRIMARY KEY NOT NULL
     ,   expires_at          TIMESTAMPTZ     NOT NULL
     ,   acquired_at         TIMESTAMPTZ     NOT NULL
     ,   owner_token         UUID            NOT NULL
@@ -162,6 +162,40 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+CREATE OR REPLACE FUNCTION "{0}".complete_messages(
+    a_message_delivery_ids  BIGINT[]
+,   a_lock_ids              UUID[]
+) RETURNS BIGINT AS
+$$
+DECLARE
+    v_deleted_count     BIGINT;
+BEGIN
+    -- Delete message deliveries that match the provided ids and locks
+    WITH deleted_deliveries AS (
+        DELETE FROM "{0}".message_delivery md
+        USING (
+            SELECT UNNEST(a_message_delivery_ids) AS message_delivery_id,
+                   UNNEST(a_lock_ids) AS lock_id
+        ) AS inputs
+        WHERE md.message_delivery_id = inputs.message_delivery_id
+          AND md.lock_id = inputs.lock_id
+        RETURNING md.message_id
+    ),
+    -- Clean up orphaned messages
+    deleted_messages AS (
+        DELETE FROM "{0}".messages m
+        WHERE m.message_id IN (SELECT DISTINCT message_id FROM deleted_deliveries)
+          AND NOT EXISTS (
+              SELECT 1 FROM "{0}".message_delivery md
+              WHERE md.message_id = m.message_id
+          )
+    )
+    SELECT COUNT(*) INTO v_deleted_count FROM deleted_deliveries;
+
+    RETURN v_deleted_count;
+END;
+$$ LANGUAGE plpgsql;
+
 CREATE OR REPLACE FUNCTION "{0}".abandon_message(
     a_message_delivery_id   BIGINT
 ,   a_lock_id               UUID
@@ -185,6 +219,44 @@ BEGIN
         INTO v_message_delivery_id;
 
     RETURN v_message_delivery_id;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION "{0}".abandon_messages(
+    a_message_delivery_ids  BIGINT[]
+,   a_lock_ids              UUID[]
+,   a_headers               JSONB[]
+,   a_delay                 INTERVAL DEFAULT INTERVAL '0 seconds'
+) RETURNS BIGINT AS
+$$
+DECLARE
+    v_visible_at        TIMESTAMPTZ;
+    v_updated_count     BIGINT;
+BEGIN
+    v_visible_at := (NOW() AT TIME ZONE 'utc');
+    IF a_delay > INTERVAL '0 seconds' THEN
+        v_visible_at := v_visible_at + a_delay;
+    END IF;
+
+    WITH inputs AS (
+        SELECT
+            UNNEST(a_message_delivery_ids) AS message_delivery_id,
+            UNNEST(a_lock_ids) AS lock_id,
+            UNNEST(a_headers) AS headers
+    ),
+    updated AS (
+        UPDATE "{0}".message_delivery md
+        SET lock_id = NULL,
+            visible_at = v_visible_at,
+            message_delivery_headers = inputs.headers
+        FROM inputs
+        WHERE md.message_delivery_id = inputs.message_delivery_id
+          AND md.lock_id = inputs.lock_id
+        RETURNING md.message_delivery_id
+    )
+    SELECT COUNT(*) INTO v_updated_count FROM updated;
+
+    RETURN v_updated_count;
 END;
 $$ LANGUAGE plpgsql;
 

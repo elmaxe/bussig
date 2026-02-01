@@ -1,7 +1,9 @@
 using System.Text.Json;
 using Bussig.Abstractions;
 using Bussig.Abstractions.Messages;
-using SecurityDriven;
+using Bussig.Abstractions.Middleware;
+using Bussig.Sending;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Bussig;
 
@@ -10,17 +12,17 @@ public sealed class Bus : IBus
     private static readonly JsonSerializerOptions HeaderJsonOptions = new(
         JsonSerializerDefaults.Web
     );
-    private readonly IOutgoingMessageSender _messageSender;
-    private readonly IMessageSerializer _serializer;
+    private readonly IServiceScopeFactory _scopeFactory;
+    private readonly OutgoingMessageMiddlewarePipeline _sendPipeline;
 
-    public Bus(IOutgoingMessageSender messageSender, IMessageSerializer serializer)
+    public Bus(IServiceScopeFactory scopeFactory, OutgoingMessageMiddlewarePipeline sendPipeline)
     {
-        _messageSender = messageSender;
-        _serializer = serializer;
+        _scopeFactory = scopeFactory;
+        _sendPipeline = sendPipeline;
     }
 
     public Task SendAsync<TMessage>(TMessage message, CancellationToken cancellationToken = default)
-        where TMessage : ICommand
+        where TMessage : IMessage
     {
         return SendAsync(message, new MessageSendOptions(), cancellationToken);
     }
@@ -30,7 +32,7 @@ public sealed class Bus : IBus
         MessageSendOptions options,
         CancellationToken cancellationToken = default
     )
-        where TMessage : ICommand
+        where TMessage : IMessage
     {
         return SendAsyncInternal(message, options, cancellationToken);
     }
@@ -41,7 +43,7 @@ public sealed class Bus : IBus
         Guid? schedulingToken,
         CancellationToken cancellationToken = default
     )
-        where TMessage : ICommand
+        where TMessage : IMessage
     {
         return ScheduleAsync(
             message,
@@ -55,7 +57,7 @@ public sealed class Bus : IBus
         MessageSendOptions options,
         CancellationToken cancellationToken = default
     )
-        where TMessage : ICommand
+        where TMessage : IMessage
     {
         return SendAsyncInternal(message, options, cancellationToken);
     }
@@ -66,7 +68,7 @@ public sealed class Bus : IBus
         Guid? schedulingToken,
         CancellationToken cancellationToken = default
     )
-        where TMessage : ICommand
+        where TMessage : IMessage
     {
         if (visibleAt < DateTimeOffset.UtcNow)
         {
@@ -89,7 +91,9 @@ public sealed class Bus : IBus
         CancellationToken cancellationToken = default
     )
     {
-        return await _messageSender.CancelAsync(schedulingToken, cancellationToken);
+        await using var scope = _scopeFactory.CreateAsyncScope();
+        var messageSender = scope.ServiceProvider.GetRequiredService<IOutgoingMessageSender>();
+        return await messageSender.CancelAsync(schedulingToken, cancellationToken);
     }
 
     private async Task SendAsyncInternal<TMessage>(
@@ -97,25 +101,22 @@ public sealed class Bus : IBus
         MessageSendOptions options,
         CancellationToken cancellationToken
     )
-        where TMessage : ICommand
+        where TMessage : IMessage
     {
-        var queueName = MessageMetadata<TMessage>.QueueName;
-        var headersJson = MessageMetadata<TMessage>.HeadersJson;
+        await using var scope = _scopeFactory.CreateAsyncScope();
 
-        var body = _serializer.SerializeToUtf8Bytes(message);
-        var outgoing = new OutgoingMessage(
-            options.MessageId ?? FastGuid.NewPostgreSqlGuid(),
-            queueName,
-            body,
-            headersJson
-        )
+        var context = new OutgoingMessageContext
         {
-            Delay = options.Delay,
-            SchedulingTokenId = options.SchedulingToken,
-            MessageVersion = options.MessageVersion,
-            Priority = options.Priority.HasValue ? (short)options.Priority : null,
+            Message = message,
+            MessageType = typeof(TMessage),
+            Options = options,
+            QueueName = MessageMetadata<TMessage>.QueueName,
+            BaseHeadersJson = MessageMetadata<TMessage>.HeadersJson,
+            ServiceProvider = scope.ServiceProvider,
+            CancellationToken = cancellationToken,
         };
-        await _messageSender.SendAsync(outgoing, cancellationToken);
+
+        await _sendPipeline.ExecuteAsync(context);
     }
 
     private static string CreateHeadersJson(string messageType)
@@ -126,7 +127,7 @@ public sealed class Bus : IBus
     }
 
     private static class MessageMetadata<TMessage>
-        where TMessage : ICommand
+        where TMessage : IMessage
     {
         public static readonly string QueueName = MessageUrn.ForType<TMessage>().ToString();
         public static readonly string HeadersJson = CreateHeadersJson(QueueName);
