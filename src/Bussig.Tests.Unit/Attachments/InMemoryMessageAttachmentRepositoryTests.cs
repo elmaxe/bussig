@@ -1,3 +1,5 @@
+using Bussig.Abstractions;
+using Bussig.Abstractions.Middleware;
 using Bussig.Attachments;
 using Bussig.Exceptions;
 
@@ -14,11 +16,11 @@ public class InMemoryMessageAttachmentRepositoryTests
         var stream = new MemoryStream(content);
 
         // Act
-        var uri = await repository.PutAsync(stream);
+        var uri = await repository.PutAsync(stream, CreateMessageContext());
 
         // Assert
         await Assert.That(uri).IsNotNull();
-        await Assert.That(uri.Scheme).IsEqualTo("https");
+        await Assert.That(uri.Scheme).IsEqualTo("urn");
     }
 
     [Test]
@@ -30,8 +32,8 @@ public class InMemoryMessageAttachmentRepositoryTests
         var stream2 = new MemoryStream("content2"u8.ToArray());
 
         // Act
-        var uri1 = await repository.PutAsync(stream1);
-        var uri2 = await repository.PutAsync(stream2);
+        var uri1 = await repository.PutAsync(stream1, CreateMessageContext());
+        var uri2 = await repository.PutAsync(stream2, CreateMessageContext());
 
         // Assert
         await Assert.That(uri1).IsNotEqualTo(uri2);
@@ -45,7 +47,7 @@ public class InMemoryMessageAttachmentRepositoryTests
         var originalContent = "test content for retrieval"u8.ToArray();
         var inputStream = new MemoryStream(originalContent);
 
-        var uri = await repository.PutAsync(inputStream);
+        var uri = await repository.PutAsync(inputStream, CreateMessageContext());
 
         // Act
         var retrievedStream = await repository.GetAsync(uri);
@@ -93,7 +95,7 @@ public class InMemoryMessageAttachmentRepositoryTests
         var content = "content to delete"u8.ToArray();
         var stream = new MemoryStream(content);
 
-        var uri = await repository.PutAsync(stream);
+        var uri = await repository.PutAsync(stream, CreateMessageContext());
 
         // Verify it exists first
         var existsBeforeDelete = await repository.GetAsync(uri);
@@ -128,7 +130,7 @@ public class InMemoryMessageAttachmentRepositoryTests
         var inputStream = new MemoryStream(content);
 
         // Act
-        var uri = await repository.PutAsync(inputStream);
+        var uri = await repository.PutAsync(inputStream, CreateMessageContext());
 
         // Dispose original stream
         inputStream.Dispose();
@@ -140,4 +142,16 @@ public class InMemoryMessageAttachmentRepositoryTests
 
         await Assert.That(memoryStream.ToArray()).IsEquivalentTo(content);
     }
+
+    private static OutgoingMessageContext CreateMessageContext() =>
+        new()
+        {
+            Message = new object(),
+            MessageType = typeof(object),
+            Options = new MessageSendOptions(),
+            QueueName = "test-queue",
+            BaseHeadersJson = "{}",
+            ServiceProvider = null!,
+            CancellationToken = CancellationToken.None,
+        };
 }

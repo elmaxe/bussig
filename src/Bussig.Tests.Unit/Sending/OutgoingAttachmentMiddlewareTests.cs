@@ -19,7 +19,7 @@ public class OutgoingAttachmentMiddlewareTests
 
         var repository = new Mock<IMessageAttachmentRepository>();
         repository
-            .Setup(r => r.PutAsync(It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
+            .Setup(r => r.PutAsync(It.IsAny<Stream>(), It.IsAny<OutgoingMessageContext>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(uploadedAddress);
 
         var serviceProvider = CreateServiceProvider(repository.Object);
@@ -48,7 +48,7 @@ public class OutgoingAttachmentMiddlewareTests
         // Assert
         await Assert.That(nextCalled).IsTrue();
         repository.Verify(
-            r => r.PutAsync(It.IsAny<Stream>(), It.IsAny<CancellationToken>()),
+            r => r.PutAsync(It.IsAny<Stream>(), It.IsAny<OutgoingMessageContext>(), It.IsAny<CancellationToken>()),
             Times.Once
         );
 
@@ -90,7 +90,7 @@ public class OutgoingAttachmentMiddlewareTests
         // Assert
         await Assert.That(nextCalled).IsTrue();
         repository.Verify(
-            r => r.PutAsync(It.IsAny<Stream>(), It.IsAny<CancellationToken>()),
+            r => r.PutAsync(It.IsAny<Stream>(), It.IsAny<OutgoingMessageContext>(), It.IsAny<CancellationToken>()),
             Times.Never
         );
     }
@@ -122,7 +122,7 @@ public class OutgoingAttachmentMiddlewareTests
         // Assert
         await Assert.That(nextCalled).IsTrue();
         repository.Verify(
-            r => r.PutAsync(It.IsAny<Stream>(), It.IsAny<CancellationToken>()),
+            r => r.PutAsync(It.IsAny<Stream>(), It.IsAny<OutgoingMessageContext>(), It.IsAny<CancellationToken>()),
             Times.Never
         );
     }
@@ -154,7 +154,7 @@ public class OutgoingAttachmentMiddlewareTests
         // Assert
         await Assert.That(nextCalled).IsTrue();
         repository.Verify(
-            r => r.PutAsync(It.IsAny<Stream>(), It.IsAny<CancellationToken>()),
+            r => r.PutAsync(It.IsAny<Stream>(), It.IsAny<OutgoingMessageContext>(), It.IsAny<CancellationToken>()),
             Times.Never
         );
     }
@@ -171,7 +171,7 @@ public class OutgoingAttachmentMiddlewareTests
         var callCount = 0;
         var repository = new Mock<IMessageAttachmentRepository>();
         repository
-            .Setup(r => r.PutAsync(It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
+            .Setup(r => r.PutAsync(It.IsAny<Stream>(), It.IsAny<OutgoingMessageContext>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(() => callCount++ == 0 ? address1 : address2);
 
         var serviceProvider = CreateServiceProvider(repository.Object);
@@ -196,7 +196,7 @@ public class OutgoingAttachmentMiddlewareTests
 
         // Assert
         repository.Verify(
-            r => r.PutAsync(It.IsAny<Stream>(), It.IsAny<CancellationToken>()),
+            r => r.PutAsync(It.IsAny<Stream>(), It.IsAny<OutgoingMessageContext>(), It.IsAny<CancellationToken>()),
             Times.Exactly(2)
         );
 
@@ -214,7 +214,7 @@ public class OutgoingAttachmentMiddlewareTests
 
         var repository = new Mock<IMessageAttachmentRepository>();
         repository
-            .Setup(r => r.PutAsync(It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
+            .Setup(r => r.PutAsync(It.IsAny<Stream>(), It.IsAny<OutgoingMessageContext>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(uploadedAddress);
 
         var serviceProvider = CreateServiceProvider(repository.Object);
@@ -239,7 +239,7 @@ public class OutgoingAttachmentMiddlewareTests
 
         // Assert - Only one upload should happen
         repository.Verify(
-            r => r.PutAsync(It.IsAny<Stream>(), It.IsAny<CancellationToken>()),
+            r => r.PutAsync(It.IsAny<Stream>(), It.IsAny<OutgoingMessageContext>(), It.IsAny<CancellationToken>()),
             Times.Once
         );
 
@@ -269,7 +269,7 @@ public class OutgoingAttachmentMiddlewareTests
 
         // Assert - Should not try to upload since property is read-only
         repository.Verify(
-            r => r.PutAsync(It.IsAny<Stream>(), It.IsAny<CancellationToken>()),
+            r => r.PutAsync(It.IsAny<Stream>(), It.IsAny<OutgoingMessageContext>(), It.IsAny<CancellationToken>()),
             Times.Never
         );
     }

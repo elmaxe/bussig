@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using Bussig.Abstractions;
+using Bussig.Abstractions.Middleware;
 using Bussig.Exceptions;
 
 namespace Bussig.Attachments;
@@ -8,9 +9,13 @@ public sealed class InMemoryMessageAttachmentRepository : IMessageAttachmentRepo
 {
     private readonly ConcurrentDictionary<Uri, byte[]> _attachments = new();
 
-    public async Task<Uri> PutAsync(Stream stream, CancellationToken cancellationToken = default)
+    public async Task<Uri> PutAsync(
+        Stream stream,
+        OutgoingMessageContext messageContext,
+        CancellationToken cancellationToken = default
+    )
     {
-        var uri = new Uri($"https://{Guid.NewGuid().ToString()}.se");
+        var uri = new Uri($"urn:{Guid.NewGuid().ToString()}");
         var ms = new MemoryStream();
         await stream.CopyToAsync(ms, cancellationToken);
         _attachments.TryAdd(uri, ms.ToArray());

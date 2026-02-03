@@ -38,6 +38,7 @@ internal sealed class OutgoingAttachmentMiddleware : IOutgoingMessageMiddleware
             // Upload the data and get the address
             var address = await attachmentRepository.PutAsync(
                 messageData.GetData()!,
+                context,
                 context.CancellationToken
             );
 

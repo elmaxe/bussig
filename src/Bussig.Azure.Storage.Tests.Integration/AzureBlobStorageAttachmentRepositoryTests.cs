@@ -1,10 +1,12 @@
 using Azure.Storage.Blobs;
-using Bussig.Azure.Storage;
+using Bussig.Abstractions;
+using Bussig.Abstractions.Middleware;
 using Bussig.Exceptions;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Testcontainers.Azurite;
 
-namespace Bussig.Tests.Integration.Attachments;
+namespace Bussig.Azure.Storage.Tests.Integration;
 
 public class AzureBlobStorageAttachmentRepositoryTests
 {
@@ -42,7 +44,7 @@ public class AzureBlobStorageAttachmentRepositoryTests
         var stream = new MemoryStream(content);
 
         // Act
-        var uri = await repository.PutAsync(stream);
+        var uri = await repository.PutAsync(stream, CreateMessageContext());
 
         // Assert
         await Assert.That(uri).IsNotNull();
@@ -63,7 +65,7 @@ public class AzureBlobStorageAttachmentRepositoryTests
         var originalContent = "content for retrieval test"u8.ToArray();
         var inputStream = new MemoryStream(originalContent);
 
-        var uri = await repository.PutAsync(inputStream);
+        var uri = await repository.PutAsync(inputStream, CreateMessageContext());
 
         // Act
         var retrievedStream = await repository.GetAsync(uri);
@@ -97,7 +99,7 @@ public class AzureBlobStorageAttachmentRepositoryTests
         var content = "content to delete"u8.ToArray();
         var stream = new MemoryStream(content);
 
-        var uri = await repository.PutAsync(stream);
+        var uri = await repository.PutAsync(stream, CreateMessageContext());
 
         // Verify it exists
         var blobName = new BlobUriBuilder(uri).BlobName;
@@ -121,7 +123,7 @@ public class AzureBlobStorageAttachmentRepositoryTests
         var content = "content to keep"u8.ToArray();
         var stream = new MemoryStream(content);
 
-        var uri = await repository.PutAsync(stream);
+        var uri = await repository.PutAsync(stream, CreateMessageContext());
 
         // Act
         await repository.DeleteAsync(uri);
@@ -154,7 +156,7 @@ public class AzureBlobStorageAttachmentRepositoryTests
         var stream = new MemoryStream(content);
 
         // Act
-        var uri = await repository.PutAsync(stream);
+        var uri = await repository.PutAsync(stream, CreateMessageContext());
 
         // Assert
         await Assert.That(uri.ToString()).EndsWith(".gzip");
@@ -175,7 +177,7 @@ public class AzureBlobStorageAttachmentRepositoryTests
             "compressed content test - make it longer for better compression ratio"u8.ToArray();
         var inputStream = new MemoryStream(originalContent);
 
-        var uri = await repository.PutAsync(inputStream);
+        var uri = await repository.PutAsync(inputStream, CreateMessageContext());
 
         // Act
         var retrievedStream = await repository.GetAsync(uri);
@@ -198,7 +200,7 @@ public class AzureBlobStorageAttachmentRepositoryTests
         var inputStream = new MemoryStream(originalContent);
 
         // Act
-        var uri = await repository.PutAsync(inputStream);
+        var uri = await repository.PutAsync(inputStream, CreateMessageContext());
         var retrievedStream = await repository.GetAsync(uri);
 
         // Assert
@@ -218,7 +220,7 @@ public class AzureBlobStorageAttachmentRepositoryTests
         var inputStream = new MemoryStream(originalContent);
 
         // Act
-        var uri = await repository.PutAsync(inputStream);
+        var uri = await repository.PutAsync(inputStream, CreateMessageContext());
         var retrievedStream = await repository.GetAsync(uri);
 
         // Assert
@@ -235,8 +237,14 @@ public class AzureBlobStorageAttachmentRepositoryTests
         var repository = CreateRepository();
 
         // Act
-        var uri1 = await repository.PutAsync(new MemoryStream("content1"u8.ToArray()));
-        var uri2 = await repository.PutAsync(new MemoryStream("content2"u8.ToArray()));
+        var uri1 = await repository.PutAsync(
+            new MemoryStream("content1"u8.ToArray()),
+            CreateMessageContext()
+        );
+        var uri2 = await repository.PutAsync(
+            new MemoryStream("content2"u8.ToArray()),
+            CreateMessageContext()
+        );
 
         // Assert
         await Assert.That(uri1).IsNotEqualTo(uri2);
@@ -250,7 +258,7 @@ public class AzureBlobStorageAttachmentRepositoryTests
         var emptyStream = new MemoryStream();
 
         // Act
-        var uri = await repository.PutAsync(emptyStream);
+        var uri = await repository.PutAsync(emptyStream, CreateMessageContext());
         var retrievedStream = await repository.GetAsync(uri);
 
         // Assert
@@ -272,9 +280,26 @@ public class AzureBlobStorageAttachmentRepositoryTests
                 ContainerName = ContainerName,
                 UseCompression = useCompression,
                 DeleteConsumedBlobs = deleteConsumedBlobs,
+                CreateContainerOnStartup = false,
             }
         );
 
-        return new AzureBlobStorageAttachmentRepository(options);
+        return new AzureBlobStorageAttachmentRepository(
+            options,
+            new BlobNameGenerator(),
+            NullLogger<AzureBlobStorageAttachmentRepository>.Instance
+        );
     }
+
+    private static OutgoingMessageContext CreateMessageContext() =>
+        new()
+        {
+            Message = new object(),
+            MessageType = typeof(object),
+            Options = new MessageSendOptions(),
+            QueueName = "test-queue",
+            BaseHeadersJson = "{}",
+            ServiceProvider = null!,
+            CancellationToken = CancellationToken.None,
+        };
 }
