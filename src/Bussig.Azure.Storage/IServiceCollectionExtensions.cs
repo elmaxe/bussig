@@ -6,7 +6,8 @@ namespace Bussig.Azure.Storage;
 public static class IServiceCollectionExtensions
 {
     public static IServiceCollection UseAzureBlobStorageAttachments(
-        this IServiceCollection services
+        this IServiceCollection services,
+        Action<AzureBlobStorageAttachmentRepositoryOptions, IServiceProvider> configure
     )
     {
         if (services.Any(x => x.ServiceType == typeof(IMessageAttachmentRepository)))
@@ -16,6 +17,14 @@ public static class IServiceCollectionExtensions
             );
         }
         services.AddSingleton<IMessageAttachmentRepository, AzureBlobStorageAttachmentRepository>();
+        if (services.All(x => x.ServiceType != typeof(IBlobNameGenerator)))
+        {
+            services.AddSingleton<IBlobNameGenerator, BlobNameGenerator>();
+        }
+
+        services
+            .AddOptions<AzureBlobStorageAttachmentRepositoryOptions>()
+            .Configure<IServiceProvider>(configure.Invoke);
 
         return services;
     }

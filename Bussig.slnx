@@ -9,6 +9,7 @@
     <File Path="README.md" />
   </Folder>
   <Folder Name="/Tests/">
+    <Project Path="src/Bussig.Azure.Storage.Tests.Integration/Bussig.Azure.Storage.Tests.Integration.csproj" />
     <Project Path="src/Bussig.Tests.Integration/Bussig.Tests.Integration.csproj" />
     <Project Path="src/Bussig.Tests.Unit/Bussig.Tests.Unit.csproj" />
   </Folder>
