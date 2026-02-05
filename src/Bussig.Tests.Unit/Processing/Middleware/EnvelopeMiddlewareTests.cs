@@ -38,9 +38,41 @@ public class EnvelopeMiddlewareTests
         // Assert
         await Assert.That(context.Envelopes).IsNotNull();
         await Assert.That(context.Envelopes!.Count).IsEqualTo(2);
-        await Assert.That(context.Envelopes[0].MessageId).IsEqualTo(message1.MessageId);
-        await Assert.That(context.Envelopes[1].MessageId).IsEqualTo(message2.MessageId);
+        await Assert.That(context.Envelopes[0].Envelope.MessageId).IsEqualTo(message1.MessageId);
+        await Assert.That(context.Envelopes[1].Envelope.MessageId).IsEqualTo(message2.MessageId);
         await Assert.That(nextCalled).IsTrue();
+    }
+
+    [Test]
+    public async Task InvokeAsync_CreatesDeliveryInfosForAllMessages()
+    {
+        // Arrange
+        var middleware = new EnvelopeMiddleware();
+
+        var message1 = CreateIncomingMessage(Guid.NewGuid()) with
+        {
+            DeliveryCount = 1,
+            MaxDeliveryCount = 5,
+        };
+        var message2 = CreateIncomingMessage(Guid.NewGuid()) with
+        {
+            DeliveryCount = 2,
+            MaxDeliveryCount = 10,
+        };
+
+        var context = CreateContext([message1, message2]);
+        context.DeserializedMessages = [new TestMessage(), new TestMessage()];
+
+        // Act
+        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+
+        // Assert
+        await Assert.That(context.DeliveryInfos).IsNotNull();
+        await Assert.That(context.DeliveryInfos!.Count).IsEqualTo(2);
+        await Assert.That(context.DeliveryInfos[0].DeliveryCount).IsEqualTo(1);
+        await Assert.That(context.DeliveryInfos[0].MaxDeliveryCount).IsEqualTo(5);
+        await Assert.That(context.DeliveryInfos[1].DeliveryCount).IsEqualTo(2);
+        await Assert.That(context.DeliveryInfos[1].MaxDeliveryCount).IsEqualTo(10);
     }
 
     [Test]
@@ -62,11 +94,11 @@ public class EnvelopeMiddlewareTests
 
         // Assert
         await Assert.That(context.Envelope).IsNotNull();
-        await Assert.That(context.Envelope!.CorrelationId).IsEqualTo(correlationId);
+        await Assert.That(context.Envelope!.Envelope.CorrelationId).IsEqualTo(correlationId);
     }
 
     [Test]
-    public async Task InvokeAsync_ParsesMessageType_FromHeaders()
+    public async Task InvokeAsync_ParsesMessageTypes_FromHeaders()
     {
         // Arrange
         var middleware = new EnvelopeMiddleware();
@@ -87,8 +119,30 @@ public class EnvelopeMiddlewareTests
         // Assert
         await Assert.That(context.Envelope).IsNotNull();
         await Assert
-            .That(context.Envelope!.MessageType)
+            .That(context.Envelope!.Envelope.MessageTypes[0])
             .IsEqualTo("urn:message:MyNamespace:MyMessage");
+    }
+
+    [Test]
+    public async Task InvokeAsync_ParsesSentAt_FromHeaders()
+    {
+        // Arrange
+        var middleware = new EnvelopeMiddleware();
+        var sentAt = DateTimeOffset.UtcNow.AddMinutes(-10);
+        var headers = JsonSerializer.Serialize(
+            new Dictionary<string, object> { ["sent-at"] = sentAt.ToString("O") }
+        );
+
+        var message = CreateIncomingMessage(Guid.NewGuid(), headers);
+        var context = CreateContext([message]);
+        context.DeserializedMessages = [new TestMessage()];
+
+        // Act
+        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+
+        // Assert
+        await Assert.That(context.Envelope).IsNotNull();
+        await Assert.That(context.Envelope!.Envelope.SentAt).IsEqualTo(sentAt);
     }
 
     [Test]
@@ -114,9 +168,11 @@ public class EnvelopeMiddlewareTests
 
         // Assert
         await Assert.That(context.Envelope).IsNotNull();
-        await Assert.That(context.Envelope!.Headers["custom-header"]).IsEqualTo("custom-value");
-        await Assert.That(context.Envelope.Headers["numeric-header"]).IsEqualTo("123");
-        await Assert.That(context.Envelope.Headers["boolean-header"]).IsEqualTo("true");
+        await Assert
+            .That(context.Envelope!.Envelope.Headers["custom-header"])
+            .IsEqualTo("custom-value");
+        await Assert.That(context.Envelope.Envelope.Headers["numeric-header"]).IsEqualTo("123");
+        await Assert.That(context.Envelope.Envelope.Headers["boolean-header"]).IsEqualTo("true");
     }
 
     [Test]
@@ -134,8 +190,8 @@ public class EnvelopeMiddlewareTests
 
         // Assert
         await Assert.That(context.Envelope).IsNotNull();
-        await Assert.That(context.Envelope!.Headers.Count).IsEqualTo(0);
-        await Assert.That(context.Envelope.CorrelationId).IsNull();
+        await Assert.That(context.Envelope!.Envelope.Headers.Count).IsEqualTo(0);
+        await Assert.That(context.Envelope.Envelope.CorrelationId).IsNull();
     }
 
     [Test]
@@ -153,11 +209,38 @@ public class EnvelopeMiddlewareTests
 
         // Assert - should not throw, headers should be empty
         await Assert.That(context.Envelope).IsNotNull();
-        await Assert.That(context.Envelope!.Headers.Count).IsEqualTo(0);
+        await Assert.That(context.Envelope!.Envelope.Headers.Count).IsEqualTo(0);
     }
 
     [Test]
-    public async Task InvokeAsync_SetsTimestamp_FromEnqueuedAt()
+    public async Task InvokeAsync_UsesSentAtFromHeaders_WhenAvailable()
+    {
+        // Arrange
+        var middleware = new EnvelopeMiddleware();
+        var sentAt = DateTimeOffset.UtcNow.AddMinutes(-5);
+        var enqueuedAt = DateTimeOffset.UtcNow.AddMinutes(-3);
+
+        var headers = JsonSerializer.Serialize(
+            new Dictionary<string, object> { ["sent-at"] = sentAt.ToString("O") }
+        );
+
+        var message = CreateIncomingMessage(Guid.NewGuid(), headers) with
+        {
+            EnqueuedAt = enqueuedAt,
+        };
+        var context = CreateContext([message]);
+        context.DeserializedMessages = [new TestMessage()];
+
+        // Act
+        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+
+        // Assert - should use sent-at from headers, not enqueued-at
+        await Assert.That(context.Envelope).IsNotNull();
+        await Assert.That(context.Envelope!.Envelope.SentAt).IsEqualTo(sentAt);
+    }
+
+    [Test]
+    public async Task InvokeAsync_FallsBackToEnqueuedAt_WhenSentAtNotInHeaders()
     {
         // Arrange
         var middleware = new EnvelopeMiddleware();
@@ -172,7 +255,7 @@ public class EnvelopeMiddlewareTests
 
         // Assert
         await Assert.That(context.Envelope).IsNotNull();
-        await Assert.That(context.Envelope!.Timestamp).IsEqualTo(enqueuedAt);
+        await Assert.That(context.Envelope!.Envelope.SentAt).IsEqualTo(enqueuedAt);
     }
 
     [Test]
@@ -261,7 +344,34 @@ public class EnvelopeMiddlewareTests
 
         // Assert
         await Assert.That(context.Envelope).IsNotNull();
-        await Assert.That(context.Envelope!.MessageType).IsEqualTo("TestMessage");
+        await Assert.That(context.Envelope!.Envelope.MessageTypes[0]).IsEqualTo("TestMessage");
+    }
+
+    [Test]
+    public async Task InvokeAsync_ParsesDeliveryHeaders()
+    {
+        // Arrange
+        var middleware = new EnvelopeMiddleware();
+        var deliveryHeadersJson = JsonSerializer.Serialize(
+            new Dictionary<string, object> { ["error"] = "previous error" }
+        );
+
+        var message = CreateIncomingMessage(Guid.NewGuid()) with
+        {
+            MessageDeliveryHeaders = deliveryHeadersJson,
+        };
+        var context = CreateContext([message]);
+        context.DeserializedMessages = [new TestMessage()];
+
+        // Act
+        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+
+        // Assert
+        await Assert.That(context.DeliveryInfo).IsNotNull();
+        var deliveryInfo = context.DeliveryInfo!;
+        var parsedDeliveryHeaders = deliveryInfo.DeliveryHeaders;
+        await Assert.That(parsedDeliveryHeaders).IsNotNull();
+        await Assert.That(parsedDeliveryHeaders!["error"]).IsEqualTo("previous error");
     }
 
     private static MessageContext CreateContext(IReadOnlyList<IncomingMessage> messages)
@@ -277,7 +387,7 @@ public class EnvelopeMiddlewareTests
             CancellationToken = CancellationToken.None,
             IsBatchProcessor = false,
             CompleteAllAsync = () => Task.CompletedTask,
-            AbandonAllAsync = _ => Task.CompletedTask,
+            AbandonAllAsync = (_, _, _, _) => Task.CompletedTask,
         };
     }
 

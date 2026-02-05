@@ -75,19 +75,37 @@ public sealed class MessageContext
     /// Delegate to abandon all messages atomically on failure.
     /// Set by the processing strategy.
     /// </summary>
-    public required Func<TimeSpan, Task> AbandonAllAsync { get; init; }
+    public required Func<
+        TimeSpan,
+        Exception?,
+        string?,
+        string?,
+        Task
+    > AbandonAllAsync { get; init; }
 
     /// <summary>
     /// The message envelopes containing metadata and payloads.
     /// Set by EnvelopeMiddleware after deserialization.
     /// </summary>
-    public IReadOnlyList<MessageEnvelope>? Envelopes { get; set; }
+    public IReadOnlyList<MessageEnvelope<object>>? Envelopes { get; set; }
 
     /// <summary>
     /// Convenience accessor for single-message envelope.
     /// Returns the first envelope when set.
     /// </summary>
-    public MessageEnvelope? Envelope => Envelopes?[0];
+    public MessageEnvelope<object>? Envelope => Envelopes?[0];
+
+    /// <summary>
+    /// The delivery information for each message.
+    /// Set by EnvelopeMiddleware after deserialization.
+    /// </summary>
+    public IReadOnlyList<DeliveryInfo>? DeliveryInfos { get; set; }
+
+    /// <summary>
+    /// Convenience accessor for single-message delivery info.
+    /// Returns the first delivery info when set.
+    /// </summary>
+    public DeliveryInfo? DeliveryInfo => DeliveryInfos?[0];
 
     /// <summary>
     /// The deserialized message bodies.

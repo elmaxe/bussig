@@ -1,6 +1,5 @@
 using System.Text.Json;
 using Bussig.Abstractions;
-using Microsoft.Extensions.Logging;
 
 namespace Bussig.Processing.Internal;
 
@@ -10,74 +9,27 @@ namespace Bussig.Processing.Internal;
 internal sealed class MessageErrorHandler
 {
     private readonly PostgresMessageReceiver _receiver;
-    private readonly RetryDelayCalculator _retryDelayCalculator;
-    private readonly ILogger _logger;
 
-    public MessageErrorHandler(
-        PostgresMessageReceiver receiver,
-        RetryDelayCalculator retryDelayCalculator,
-        ILogger logger
-    )
+    public MessageErrorHandler(PostgresMessageReceiver receiver)
     {
         _receiver = receiver;
-        _retryDelayCalculator = retryDelayCalculator;
-        _logger = logger;
-    }
-
-    public async Task HandleErrorAsync(
-        IncomingMessage message,
-        string queueName,
-        Exception exception,
-        CancellationToken cancellationToken
-    )
-    {
-        _logger.LogError(
-            exception,
-            "Error processing message {MessageId} from queue {QueueName} (delivery {DeliveryCount}/{MaxDeliveryCount})",
-            message.MessageId,
-            queueName,
-            message.DeliveryCount,
-            message.MaxDeliveryCount
-        );
-
-        // Check if we've exceeded max delivery count
-        if (message.DeliveryCount >= message.MaxDeliveryCount)
-        {
-            _logger.LogWarning(
-                "Message {MessageId} exceeded max delivery count, sending to dead letter queue",
-                message.MessageId
-            );
-
-            await DeadletterAsync(
-                message,
-                queueName,
-                exception.Message,
-                "MaxRetriesExceeded",
-                cancellationToken
-            );
-        }
-        else
-        {
-            // Abandon with delay for retry
-            await AbandonAsync(
-                message,
-                exception.Message,
-                "ProcessingFailed",
-                _retryDelayCalculator.CalculateDelay(message, exception),
-                cancellationToken
-            );
-        }
     }
 
     public async Task DeadletterAsync(
         IncomingMessage message,
         string queueName,
-        string errorMessage,
+        Exception? errorException,
+        string? errorMessage,
         string errorCode,
         CancellationToken cancellationToken
     )
     {
-        var headers = BuildErrorHeaders(message.MessageDeliveryHeaders, errorMessage, errorCode);
+        var headers = BuildErrorHeaders(
+            message.MessageDeliveryHeaders,
+            errorException,
+            errorMessage,
+            errorCode
+        );
         await _receiver.DeadletterAsync(
             message.MessageDeliveryId,
             message.LockId,
@@ -89,13 +41,19 @@ internal sealed class MessageErrorHandler
 
     public async Task AbandonAsync(
         IncomingMessage message,
+        Exception? errorException,
         string errorMessage,
         string errorCode,
         TimeSpan delay,
         CancellationToken cancellationToken
     )
     {
-        var headers = BuildErrorHeaders(message.MessageDeliveryHeaders, errorMessage, errorCode);
+        var headers = BuildErrorHeaders(
+            message.MessageDeliveryHeaders,
+            errorException,
+            errorMessage,
+            errorCode
+        );
         await _receiver.AbandonAsync(
             message.MessageDeliveryId,
             message.LockId,
@@ -107,6 +65,7 @@ internal sealed class MessageErrorHandler
 
     public async Task AbandonAsync(
         IReadOnlyList<IncomingMessage> messages,
+        Exception? errorException,
         string errorMessage,
         string errorCode,
         TimeSpan delay,
@@ -116,7 +75,7 @@ internal sealed class MessageErrorHandler
         var deliveryIds = messages.Select(m => m.MessageDeliveryId).ToArray();
         var lockIds = messages.Select(m => m.LockId).ToArray();
         var headers = messages.Select(m =>
-            BuildErrorHeaders(m.MessageDeliveryHeaders, errorMessage, errorCode)
+            BuildErrorHeaders(m.MessageDeliveryHeaders, errorException, errorMessage, errorCode)
         );
         await _receiver.AbandonAsync(deliveryIds, lockIds, headers, delay, cancellationToken);
     }
@@ -137,15 +96,17 @@ internal sealed class MessageErrorHandler
 
     public static string BuildErrorHeaders(
         string? existingHeaders,
-        string errorMessage,
+        Exception? errorException,
+        string? errorMessage,
         string errorCode
     )
     {
-        var headers = string.IsNullOrEmpty(existingHeaders)
-            ? new Dictionary<string, object>()
-            : JsonSerializer.Deserialize<Dictionary<string, object>>(existingHeaders) ?? [];
+        var headers = string.IsNullOrWhiteSpace(existingHeaders)
+            ? new Dictionary<string, object?>()
+            : JsonSerializer.Deserialize<Dictionary<string, object?>>(existingHeaders) ?? [];
 
-        headers["error-message"] = errorMessage;
+        headers["error-exception"] = errorException?.ToString();
+        headers["error-message"] = errorException?.Message ?? errorMessage;
         headers["error-code"] = errorCode;
         headers["error-timestamp"] = DateTimeOffset.UtcNow.ToString("O");
 

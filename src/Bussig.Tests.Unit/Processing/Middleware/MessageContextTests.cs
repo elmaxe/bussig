@@ -95,6 +95,35 @@ public class MessageContextTests
     }
 
     [Test]
+    public async Task DeliveryInfo_ReturnsFirst_WhenSet()
+    {
+        // Arrange
+        var context = CreateContext([CreateIncomingMessage()]);
+        var deliveryInfo1 = CreateDeliveryInfo(1, 5);
+        var deliveryInfo2 = CreateDeliveryInfo(2, 10);
+        context.DeliveryInfos = [deliveryInfo1, deliveryInfo2];
+
+        // Act
+        var result = context.DeliveryInfo;
+
+        // Assert
+        await Assert.That(result).IsEqualTo(deliveryInfo1);
+    }
+
+    [Test]
+    public async Task DeliveryInfo_ReturnsNull_WhenNotSet()
+    {
+        // Arrange
+        var context = CreateContext([CreateIncomingMessage()]);
+
+        // Act
+        var result = context.DeliveryInfo;
+
+        // Assert
+        await Assert.That(result).IsNull();
+    }
+
+    [Test]
     public async Task ProcessorContext_ReturnsFirst_WhenSet()
     {
         // Arrange
@@ -268,7 +297,7 @@ public class MessageContextTests
             CancellationToken = CancellationToken.None,
             IsBatchProcessor = isBatchProcessor,
             CompleteAllAsync = () => Task.CompletedTask,
-            AbandonAllAsync = _ => Task.CompletedTask,
+            AbandonAllAsync = (_, _, _, _) => Task.CompletedTask,
         };
     }
 
@@ -292,14 +321,27 @@ public class MessageContextTests
         };
     }
 
-    private static MessageEnvelope CreateEnvelope(Guid messageId)
+    private static MessageEnvelope<object> CreateEnvelope(Guid messageId)
     {
-        return new MessageEnvelope
+        return new MessageEnvelope<object>
         {
-            MessageId = messageId,
-            MessageType = "TestMessage",
-            Timestamp = DateTimeOffset.UtcNow,
+            Envelope = new MessageEnvelope
+            {
+                MessageId = messageId,
+                SentAt = DateTimeOffset.UtcNow,
+                MessageTypes = ["TestMessage"],
+            },
             Payload = new TestMessage(),
+        };
+    }
+
+    private static DeliveryInfo CreateDeliveryInfo(int deliveryCount, int maxDeliveryCount)
+    {
+        return new DeliveryInfo
+        {
+            DeliveryCount = deliveryCount,
+            MaxDeliveryCount = maxDeliveryCount,
+            EnqueuedAt = DateTimeOffset.UtcNow,
         };
     }
 

@@ -133,12 +133,6 @@ internal sealed class BatchMessageStrategy : IMessageProcessingStrategy
         CancellationToken stoppingToken
     )
     {
-        _logger.LogDebug(
-            "Processing batch of {Count} messages from queue {QueueName}",
-            incomingMessages.Count,
-            _config.QueueName
-        );
-
         await using var scope = _scopeFactory.CreateAsyncScope();
 
         // Build the unified message context with the batch
@@ -154,7 +148,8 @@ internal sealed class BatchMessageStrategy : IMessageProcessingStrategy
             CancellationToken = stoppingToken,
             IsBatchProcessor = true,
             CompleteAllAsync = () => CompleteAllMessagesAsync(incomingMessages),
-            AbandonAllAsync = delay => AbandonAllMessagesAsync(incomingMessages, delay),
+            AbandonAllAsync = (delay, exception, _, _) =>
+                AbandonAllMessagesAsync(incomingMessages, exception, delay),
         };
 
         // Create and execute the unified middleware pipeline
@@ -178,14 +173,15 @@ internal sealed class BatchMessageStrategy : IMessageProcessingStrategy
 
     private async Task AbandonAllMessagesAsync(
         IReadOnlyList<IncomingMessage> messages,
+        Exception? exception,
         TimeSpan delay
     )
     {
-        var retryCalculator = new RetryDelayCalculator(_config.Options.Retry);
-        var errorHandler = new MessageErrorHandler(_receiver, retryCalculator, _logger);
+        var errorHandler = new MessageErrorHandler(_receiver);
 
         await errorHandler.AbandonAsync(
             messages,
+            exception,
             "Batch processing failed",
             "BatchProcessingFailed",
             delay,

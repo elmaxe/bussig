@@ -138,7 +138,8 @@ internal sealed class SingleMessageStrategy : IMessageProcessingStrategy
                 CancellationToken = stoppingToken,
                 IsBatchProcessor = false,
                 CompleteAllAsync = () => CompleteMessageAsync(incomingMessage),
-                AbandonAllAsync = delay => AbandonMessageAsync(incomingMessage, delay),
+                AbandonAllAsync = (delay, exception, _, _) =>
+                    AbandonMessageAsync(incomingMessage, exception, delay),
             };
 
             // Create and execute the middleware pipeline
@@ -166,13 +167,17 @@ internal sealed class SingleMessageStrategy : IMessageProcessingStrategy
         );
     }
 
-    private async Task AbandonMessageAsync(IncomingMessage message, TimeSpan delay)
+    private async Task AbandonMessageAsync(
+        IncomingMessage message,
+        Exception? exception,
+        TimeSpan delay
+    )
     {
-        var retryCalculator = new RetryDelayCalculator(_config.Options.Retry);
-        var errorHandler = new MessageErrorHandler(_receiver, retryCalculator, _logger);
+        var errorHandler = new MessageErrorHandler(_receiver);
 
         await errorHandler.AbandonAsync(
             message,
+            exception,
             "Processing failed",
             "ProcessingFailed",
             delay,

@@ -4,6 +4,7 @@ using Bussig.Abstractions;
 using Bussig.Abstractions.Messages;
 using Bussig.Abstractions.Middleware;
 using Bussig.Abstractions.Options;
+using Bussig.Exceptions;
 using Bussig.Processing.Middleware;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
@@ -81,7 +82,7 @@ public class DeserializationMiddlewareTests
     }
 
     [Test]
-    public async Task InvokeAsync_SetsDeserializationFailed_WhenDeserializationReturnsNull()
+    public async Task InvokeAsync_ThrowsDeserializationException_WhenDeserializationReturnsNull()
     {
         // Arrange
         var serializer = new Mock<IMessageSerializer>();
@@ -97,25 +98,25 @@ public class DeserializationMiddlewareTests
         var context = CreateContext([CreateIncomingMessage([1, 2, 3])]);
         var nextCalled = false;
 
-        // Act
-        await middleware.InvokeAsync(
-            context,
-            _ =>
-            {
-                nextCalled = true;
-                return Task.CompletedTask;
-            }
+        // Act & Assert
+        var ex = await Assert.ThrowsAsync<DeserializationException>(
+            () =>
+                middleware.InvokeAsync(
+                    context,
+                    _ =>
+                    {
+                        nextCalled = true;
+                        return Task.CompletedTask;
+                    }
+                )
         );
 
-        // Assert
-        await Assert.That(context.Items[MiddlewareConstants.DeserializationFailed]).IsEqualTo(true);
-        await Assert.That(context.Items[MiddlewareConstants.ErrorCode]).IsEqualTo("NullMessage");
-        await Assert.That(context.Exception).IsNotNull();
+        await Assert.That(ex!.Message).Contains("null");
         await Assert.That(nextCalled).IsFalse();
     }
 
     [Test]
-    public async Task InvokeAsync_SetsDeserializationFailed_WhenExceptionThrown()
+    public async Task InvokeAsync_ThrowsDeserializationException_WhenExceptionThrown()
     {
         // Arrange
         var serializer = new Mock<IMessageSerializer>();
@@ -131,25 +132,21 @@ public class DeserializationMiddlewareTests
         var context = CreateContext([CreateIncomingMessage([1, 2, 3])]);
         var nextCalled = false;
 
-        // Act
-        await middleware.InvokeAsync(
-            context,
-            _ =>
-            {
-                nextCalled = true;
-                return Task.CompletedTask;
-            }
+        // Act & Assert
+        var ex = await Assert.ThrowsAsync<DeserializationException>(
+            () =>
+                middleware.InvokeAsync(
+                    context,
+                    _ =>
+                    {
+                        nextCalled = true;
+                        return Task.CompletedTask;
+                    }
+                )
         );
 
-        // Assert
-        await Assert.That(context.Items[MiddlewareConstants.DeserializationFailed]).IsEqualTo(true);
-        await Assert
-            .That(context.Items[MiddlewareConstants.ErrorCode])
-            .IsEqualTo("DeserializationFailed");
-        await Assert
-            .That(context.Items[MiddlewareConstants.ErrorMessage])
-            .IsEqualTo("Invalid JSON");
-        await Assert.That(context.Exception).IsNotNull();
+        await Assert.That(ex!.Message).IsEqualTo("Invalid JSON");
+        await Assert.That(ex.InnerException).IsTypeOf<JsonException>();
         await Assert.That(nextCalled).IsFalse();
     }
 
@@ -210,11 +207,11 @@ public class DeserializationMiddlewareTests
             CreateIncomingMessage(invalidBody),
         ]);
 
-        // Act
-        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+        // Act & Assert
+        await Assert.ThrowsAsync<DeserializationException>(
+            () => middleware.InvokeAsync(context, _ => Task.CompletedTask)
+        );
 
-        // Assert
-        await Assert.That(context.Items[MiddlewareConstants.DeserializationFailed]).IsEqualTo(true);
         await Assert.That(callCount).IsEqualTo(2);
     }
 
@@ -231,7 +228,7 @@ public class DeserializationMiddlewareTests
             CancellationToken = CancellationToken.None,
             IsBatchProcessor = false,
             CompleteAllAsync = () => Task.CompletedTask,
-            AbandonAllAsync = _ => Task.CompletedTask,
+            AbandonAllAsync = (_, _, _, _) => Task.CompletedTask,
         };
     }
 
