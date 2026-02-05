@@ -3,7 +3,6 @@ using Bussig.Abstractions;
 using Bussig.Abstractions.Messages;
 using Bussig.Abstractions.Middleware;
 using Bussig.Constants;
-using Bussig.Processing.Internal;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Npgsql;
@@ -39,7 +38,12 @@ internal sealed class ProcessorInvocationMiddleware : IMessageMiddleware
 
     public async Task InvokeAsync(MessageContext context, MessageMiddlewareDelegate nextMiddleware)
     {
-        if (context.IsHandled || context.DeserializedMessages is null)
+        if (
+            context.IsHandled
+            || context.DeserializedMessages is null
+            || context.Envelopes is null
+            || context.DeliveryInfos is null
+        )
         {
             await nextMiddleware(context);
             return;
@@ -49,9 +53,11 @@ internal sealed class ProcessorInvocationMiddleware : IMessageMiddleware
         var contexts = new List<object>(context.Messages.Count);
         for (var i = 0; i < context.Messages.Count; i++)
         {
-            var processorContext = ProcessorContextFactory.CreateContext(
+            var processorContext = CreateContext(
                 context.Messages[i],
                 context.DeserializedMessages[i],
+                context.Envelopes[i].Envelope,
+                context.DeliveryInfos[i],
                 context.MessageType
             );
             contexts.Add(processorContext);
@@ -211,5 +217,39 @@ internal sealed class ProcessorInvocationMiddleware : IMessageMiddleware
     {
         var typedContexts = contexts.Cast<MessageProcessorContext<TMessage>>();
         return new MessageBatch<TMessage>(typedContexts);
+    }
+
+    private static object CreateContext(
+        IncomingMessage incomingMessage,
+        object messageBody,
+        MessageEnvelope envelope,
+        DeliveryInfo delivery,
+        Type messageType
+    )
+    {
+        var contextType = typeof(MessageProcessorContext<>).MakeGenericType(messageType);
+        var context = Activator.CreateInstance(
+            contextType,
+            BindingFlags.Instance | BindingFlags.NonPublic,
+            binder: null,
+            args:
+            [
+                messageBody,
+                envelope,
+                delivery,
+                incomingMessage.MessageDeliveryId,
+                incomingMessage.LockId,
+            ],
+            culture: null
+        );
+
+        if (context is null)
+        {
+            throw new InvalidOperationException(
+                $"Failed to create context for message type {messageType.Name}"
+            );
+        }
+
+        return context;
     }
 }

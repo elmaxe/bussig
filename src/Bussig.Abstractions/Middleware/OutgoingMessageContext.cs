@@ -27,9 +27,9 @@ public sealed class OutgoingMessageContext
     public required string QueueName { get; init; }
 
     /// <summary>
-    /// The base headers JSON (from message type metadata).
+    /// The message types (URNs) for this message.
     /// </summary>
-    public required string BaseHeadersJson { get; init; }
+    public required IReadOnlyList<string> MessageTypes { get; init; }
 
     /// <summary>
     /// The service provider for resolving dependencies.
@@ -48,10 +48,16 @@ public sealed class OutgoingMessageContext
     public byte[]? SerializedBody { get; set; }
 
     /// <summary>
-    /// The final headers JSON with all merged headers.
+    /// The message envelope containing metadata.
     /// Set by OutgoingSerializationMiddleware.
     /// </summary>
-    public string? FinalHeadersJson { get; set; }
+    public MessageEnvelope? Envelope { get; set; }
+
+    /// <summary>
+    /// The serialized envelope JSON for storage.
+    /// Set by OutgoingSerializationMiddleware.
+    /// </summary>
+    public string? EnvelopeJson { get; set; }
 
     /// <summary>
     /// The constructed outgoing message.

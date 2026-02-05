@@ -310,7 +310,7 @@ public class AttachmentMiddlewareTests
             CancellationToken = CancellationToken.None,
             IsBatchProcessor = isBatch,
             CompleteAllAsync = () => Task.CompletedTask,
-            AbandonAllAsync = _ => Task.CompletedTask,
+            AbandonAllAsync = (_, _, _, _) => Task.CompletedTask,
             DeserializedMessages = deserializedMessage is not null ? [deserializedMessage] : null,
         };
     }

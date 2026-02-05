@@ -1,5 +1,6 @@
 using Bussig.Abstractions;
 using Bussig.Abstractions.Middleware;
+using Bussig.Exceptions;
 using Microsoft.Extensions.Logging;
 
 namespace Bussig.Processing.Middleware;
@@ -7,7 +8,6 @@ namespace Bussig.Processing.Middleware;
 /// <summary>
 /// Middleware that deserializes all message bodies.
 /// Sets context.DeserializedMessages on success.
-/// Sets deserialization failure flags in context.Items on failure.
 /// Handles both single-message and batch processing.
 /// </summary>
 internal sealed class DeserializationMiddleware : IMessageMiddleware
@@ -41,38 +41,14 @@ internal sealed class DeserializationMiddleware : IMessageMiddleware
 
                 if (body is null)
                 {
-                    _logger.LogError(
-                        "Deserialized message {MessageId} is null for queue {QueueName}",
-                        message.MessageId,
-                        context.QueueName
-                    );
-
-                    context.Exception = new InvalidOperationException(
-                        "Message body deserialized to null"
-                    );
-                    context.Items[MiddlewareConstants.DeserializationFailed] = true;
-                    context.Items[MiddlewareConstants.ErrorMessage] =
-                        "Message body deserialized to null";
-                    context.Items[MiddlewareConstants.ErrorCode] = "NullMessage";
-                    return;
+                    throw new DeserializationException("Message body deserialized to null");
                 }
 
                 deserializedMessages.Add(body);
             }
             catch (Exception ex)
             {
-                _logger.LogError(
-                    ex,
-                    "Failed to deserialize message {MessageId} for queue {QueueName}",
-                    message.MessageId,
-                    context.QueueName
-                );
-
-                context.Exception = ex;
-                context.Items[MiddlewareConstants.DeserializationFailed] = true;
-                context.Items[MiddlewareConstants.ErrorMessage] = ex.Message;
-                context.Items[MiddlewareConstants.ErrorCode] = "DeserializationFailed";
-                return;
+                throw new DeserializationException(ex.Message, ex);
             }
         }
 

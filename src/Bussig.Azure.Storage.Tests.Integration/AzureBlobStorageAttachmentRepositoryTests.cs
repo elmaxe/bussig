@@ -298,7 +298,7 @@ public class AzureBlobStorageAttachmentRepositoryTests
             MessageType = typeof(object),
             Options = new MessageSendOptions(),
             QueueName = "test-queue",
-            BaseHeadersJson = "{}",
+            MessageTypes = ["test-queue"],
             ServiceProvider = null!,
             CancellationToken = CancellationToken.None,
         };

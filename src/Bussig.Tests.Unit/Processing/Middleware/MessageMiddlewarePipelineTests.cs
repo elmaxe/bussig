@@ -171,7 +171,7 @@ public class MessageMiddlewarePipelineTests
             CancellationToken = CancellationToken.None,
             IsBatchProcessor = false,
             CompleteAllAsync = () => Task.CompletedTask,
-            AbandonAllAsync = _ => Task.CompletedTask,
+            AbandonAllAsync = (_, _, _, _) => Task.CompletedTask,
         };
     }
 

@@ -1,4 +1,3 @@
-using System.Text.Json;
 using Bussig.Abstractions;
 using Bussig.Abstractions.Messages;
 using Bussig.Abstractions.Middleware;
@@ -9,9 +8,6 @@ namespace Bussig;
 
 public sealed class Bus : IBus
 {
-    private static readonly JsonSerializerOptions HeaderJsonOptions = new(
-        JsonSerializerDefaults.Web
-    );
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly OutgoingMessageMiddlewarePipeline _sendPipeline;
 
@@ -111,7 +107,7 @@ public sealed class Bus : IBus
             MessageType = typeof(TMessage),
             Options = options,
             QueueName = MessageMetadata<TMessage>.QueueName,
-            BaseHeadersJson = MessageMetadata<TMessage>.HeadersJson,
+            MessageTypes = MessageMetadata<TMessage>.MessageTypes,
             ServiceProvider = scope.ServiceProvider,
             CancellationToken = cancellationToken,
         };
@@ -119,17 +115,10 @@ public sealed class Bus : IBus
         await _sendPipeline.ExecuteAsync(context);
     }
 
-    private static string CreateHeadersJson(string messageType)
-    {
-        var headers = new Dictionary<string, object> { ["message-types"] = new[] { messageType } };
-
-        return JsonSerializer.Serialize(headers, HeaderJsonOptions);
-    }
-
     private static class MessageMetadata<TMessage>
         where TMessage : IMessage
     {
         public static readonly string QueueName = MessageUrn.ForType<TMessage>().ToString();
-        public static readonly string HeadersJson = CreateHeadersJson(QueueName);
+        public static readonly IReadOnlyList<string> MessageTypes = [QueueName];
     }
 }

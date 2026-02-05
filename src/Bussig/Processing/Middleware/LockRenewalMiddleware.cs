@@ -39,15 +39,12 @@ internal sealed class LockRenewalMiddleware : IMessageMiddleware
         );
 
         // Start lock renewal for all messages
+        // TODO: run one task for a batch of messages if we are a batch consumer. Use context.IsBatchProcessor
         var lockRenewalTasks = context
             .Messages.Select(m =>
                 lockManager.RunLockRenewalAsync(m.MessageDeliveryId, m.LockId, lockRenewalCts.Token)
             )
             .ToList();
-
-        // Store for potential access by other middleware
-        context.SetItem(MiddlewareConstants.LockRenewalCts, lockRenewalCts);
-        context.SetItem(MiddlewareConstants.LockRenewalTask, Task.WhenAll(lockRenewalTasks));
 
         try
         {

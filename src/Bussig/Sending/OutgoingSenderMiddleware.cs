@@ -1,7 +1,6 @@
 using Bussig.Abstractions;
 using Bussig.Abstractions.Middleware;
 using Microsoft.Extensions.DependencyInjection;
-using SecurityDriven;
 
 namespace Bussig.Sending;
 
@@ -24,16 +23,22 @@ internal sealed class OutgoingSenderMiddleware : IOutgoingMessageMiddleware
         }
 
         // Build the outgoing message
+        var envelope =
+            context.Envelope
+            ?? throw new InvalidOperationException(
+                "Envelope must be set before OutgoingSenderMiddleware"
+            );
+
         var outgoing = new OutgoingMessage(
-            context.Options.MessageId ?? FastGuid.NewPostgreSqlGuid(),
+            envelope.MessageId,
             context.QueueName,
             context.SerializedBody
                 ?? throw new InvalidOperationException(
-                    $"nameof{context.SerializedBody} must be set before OutgoingSenderMiddleware"
+                    "SerializedBody must be set before OutgoingSenderMiddleware"
                 ),
-            context.FinalHeadersJson
+            context.EnvelopeJson
                 ?? throw new InvalidOperationException(
-                    "FinalHeadersJson must be set before OutgoingSenderMiddleware"
+                    "EnvelopeJson must be set before OutgoingSenderMiddleware"
                 )
         )
         {

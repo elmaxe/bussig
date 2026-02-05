@@ -10,10 +10,10 @@ public class MessageErrorHandlerTests
     public async Task BuildErrorHeaders_WithNullExistingHeaders_CreatesNewHeaders()
     {
         // Act
-        var result = MessageErrorHandler.BuildErrorHeaders(null, "Test error", "TestCode");
+        var result = MessageErrorHandler.BuildErrorHeaders(null, null, "Test error", "TestCode");
 
         // Assert
-        var headers = JsonSerializer.Deserialize<Dictionary<string, object>>(result);
+        var headers = JsonSerializer.Deserialize<Dictionary<string, object?>>(result);
         await Assert.That(headers).IsNotNull();
         await Assert.That(headers!.ContainsKey("error-message")).IsTrue();
         await Assert.That(headers.ContainsKey("error-code")).IsTrue();
@@ -24,10 +24,10 @@ public class MessageErrorHandlerTests
     public async Task BuildErrorHeaders_WithEmptyExistingHeaders_CreatesNewHeaders()
     {
         // Act
-        var result = MessageErrorHandler.BuildErrorHeaders("", "Test error", "TestCode");
+        var result = MessageErrorHandler.BuildErrorHeaders("", null, "Test error", "TestCode");
 
         // Assert
-        var headers = JsonSerializer.Deserialize<Dictionary<string, object>>(result);
+        var headers = JsonSerializer.Deserialize<Dictionary<string, object?>>(result);
         await Assert.That(headers).IsNotNull();
         await Assert.That(headers!.ContainsKey("error-message")).IsTrue();
     }
@@ -37,6 +37,7 @@ public class MessageErrorHandlerTests
     {
         // Act
         var result = MessageErrorHandler.BuildErrorHeaders(
+            null,
             null,
             "Something went wrong",
             "ErrorCode"
@@ -53,6 +54,7 @@ public class MessageErrorHandlerTests
         // Act
         var result = MessageErrorHandler.BuildErrorHeaders(
             null,
+            null,
             "Test error",
             "MaxRetriesExceeded"
         );
@@ -67,7 +69,7 @@ public class MessageErrorHandlerTests
     {
         // Act
         var beforeCall = DateTimeOffset.UtcNow;
-        var result = MessageErrorHandler.BuildErrorHeaders(null, "Test error", "TestCode");
+        var result = MessageErrorHandler.BuildErrorHeaders(null, null, "Test error", "TestCode");
         var afterCall = DateTimeOffset.UtcNow;
 
         // Assert
@@ -96,6 +98,7 @@ public class MessageErrorHandlerTests
         // Act
         var result = MessageErrorHandler.BuildErrorHeaders(
             existingHeaders,
+            null,
             "Test error",
             "TestCode"
         );
@@ -121,7 +124,12 @@ public class MessageErrorHandlerTests
         );
 
         // Act
-        var result = MessageErrorHandler.BuildErrorHeaders(existingHeaders, "New error", "NewCode");
+        var result = MessageErrorHandler.BuildErrorHeaders(
+            existingHeaders,
+            null,
+            "New error",
+            "NewCode"
+        );
 
         // Assert
         var headers = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(result);
@@ -137,6 +145,7 @@ public class MessageErrorHandlerTests
     {
         // Act
         var result = MessageErrorHandler.BuildErrorHeaders(
+            null,
             null,
             "Error with \"quotes\" and special chars: <>&",
             "Code123"
@@ -159,10 +168,29 @@ public class MessageErrorHandlerTests
     public async Task BuildErrorHeaders_AcceptsCommonErrorCodes(string errorCode)
     {
         // Act
-        var result = MessageErrorHandler.BuildErrorHeaders(null, "Test error", errorCode);
+        var result = MessageErrorHandler.BuildErrorHeaders(null, null, "Test error", errorCode);
 
         // Assert
         var headers = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(result);
         await Assert.That(headers!["error-code"].GetString()).IsEqualTo(errorCode);
+    }
+
+    [Test]
+    public async Task BuildErrorHeaders_WithException_StoresExceptionDetails()
+    {
+        // Arrange
+        var exception = new InvalidOperationException("Test exception message");
+
+        // Act
+        var result = MessageErrorHandler.BuildErrorHeaders(
+            null,
+            exception,
+            "Processing failed",
+            "ProcessingFailed"
+        );
+
+        // Assert
+        var headers = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(result);
+        await Assert.That(headers!.ContainsKey("error-exception")).IsTrue();
     }
 }

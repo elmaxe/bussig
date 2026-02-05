@@ -2,11 +2,12 @@ using System.Text.Json;
 using Bussig.Abstractions;
 using Bussig.Abstractions.Middleware;
 using Microsoft.Extensions.DependencyInjection;
+using SecurityDriven;
 
 namespace Bussig.Sending;
 
 /// <summary>
-/// Middleware that serializes the message body and merges headers.
+/// Middleware that serializes the message body and constructs the envelope.
 /// </summary>
 internal sealed class OutgoingSerializationMiddleware : IOutgoingMessageMiddleware
 {
@@ -24,42 +25,40 @@ internal sealed class OutgoingSerializationMiddleware : IOutgoingMessageMiddlewa
         // Serialize the message body
         context.SerializedBody = serializer.SerializeToUtf8Bytes(context.Message);
 
-        // Merge headers
-        context.FinalHeadersJson = MergeHeaders(
-            context.BaseHeadersJson,
-            context.Options.CorrelationId,
-            context.Options.Headers
-        );
+        // Build the envelope
+        var envelope = new MessageEnvelope
+        {
+            MessageId = context.Options.MessageId ?? FastGuid.NewPostgreSqlGuid(),
+            SentAt = DateTimeOffset.UtcNow,
+            MessageTypes = context.MessageTypes,
+            CorrelationId = context.Options.CorrelationId,
+            Headers = context.Options.Headers,
+        };
+
+        context.Envelope = envelope;
+
+        // Serialize envelope to JSON for storage
+        context.EnvelopeJson = SerializeEnvelope(envelope);
 
         return nextMiddleware(context);
     }
 
-    private static string MergeHeaders(
-        string baseHeadersJson,
-        Guid? correlationId,
-        Dictionary<string, object>? customHeaders
-    )
+    private static string SerializeEnvelope(MessageEnvelope envelope)
     {
-        var hasCustomHeaders = customHeaders is { Count: > 0 };
-        if (correlationId is null && !hasCustomHeaders)
+        var headers = new Dictionary<string, object>
         {
-            return baseHeadersJson;
+            ["message-types"] = envelope.MessageTypes,
+            ["sent-at"] = envelope.SentAt.ToString("O"),
+        };
+
+        if (envelope.CorrelationId is not null)
+        {
+            headers["correlation-id"] = envelope.CorrelationId.Value.ToString();
         }
 
-        var headers =
-            JsonSerializer.Deserialize<Dictionary<string, object>>(
-                baseHeadersJson,
-                HeaderJsonOptions
-            ) ?? new Dictionary<string, object>();
-
-        if (correlationId is not null)
+        if (envelope.Headers.Count > 0)
         {
-            headers["correlation-id"] = correlationId.Value.ToString();
-        }
-
-        if (hasCustomHeaders)
-        {
-            foreach (var (key, value) in customHeaders!)
+            foreach (var (key, value) in envelope.Headers)
             {
                 headers[key] = value;
             }

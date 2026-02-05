@@ -36,8 +36,7 @@ public record MessageSendOptions
     public Guid? CorrelationId { get; init; }
 
     /// <summary>
-    /// Custom headers to include with the message.
-    /// These are merged into the message's HeadersJson.
+    /// Custom headers to include with the message envelope.
     /// </summary>
-    public Dictionary<string, object> Headers { get; init; } = new();
+    public Dictionary<string, string> Headers { get; init; } = new();
 }

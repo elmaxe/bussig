@@ -1,4 +1,5 @@
 using Bussig.Abstractions.Middleware;
+using Bussig.Exceptions;
 using Bussig.Processing.Internal;
 using Microsoft.Extensions.Logging;
 
@@ -26,43 +27,26 @@ internal sealed class ErrorHandlingMiddleware : IMessageMiddleware
     {
         // Create error handler with processor-specific options
         var retryCalculator = new RetryDelayCalculator(context.Options.Retry);
-        var errorHandler = new MessageErrorHandler(_receiver, retryCalculator, _logger);
+        var errorHandler = new MessageErrorHandler(_receiver);
 
         try
         {
             await nextMiddleware(context);
-
-            // Check if any middleware signaled a deserialization failure
-            if (
-                context.Items.TryGetValue(MiddlewareConstants.DeserializationFailed, out var failed)
-                && failed is true
-            )
-            {
-                var errorMessage = context.Items.TryGetValue(
-                    MiddlewareConstants.ErrorMessage,
-                    out var msg
-                )
-                    ? msg as string ?? "Deserialization failed"
-                    : "Deserialization failed";
-
-                var errorCode = context.Items.TryGetValue(
-                    MiddlewareConstants.ErrorCode,
-                    out var code
-                )
-                    ? code as string ?? "DeserializationFailed"
-                    : "DeserializationFailed";
-
-                _logger.LogError(
-                    "Deserialization failed for {Count} message(s) from queue {QueueName}, sending to dead letter",
-                    context.Messages.Count,
-                    context.QueueName
-                );
-
-                await DeadletterAllAsync(context, errorHandler, errorMessage, errorCode);
-                context.IsHandled = true;
-            }
         }
-        catch (OperationCanceledException) when (context.CancellationToken.IsCancellationRequested)
+        catch (DeserializationException ex)
+        {
+            context.Exception = ex;
+            _logger.LogError(
+                "Deserialization failed for {Count} message(s) from queue {QueueName}, sending to dead letter",
+                context.Messages.Count,
+                context.QueueName
+            );
+
+            await DeadletterAllAsync(context, errorHandler, context.Exception, null, "NullMessage");
+            context.IsHandled = true;
+        }
+        catch (OperationCanceledException ex)
+            when (context.CancellationToken.IsCancellationRequested)
         {
             // Abandon all messages when shutting down so they can be reprocessed
             _logger.LogWarning(
@@ -71,16 +55,17 @@ internal sealed class ErrorHandlingMiddleware : IMessageMiddleware
                 context.QueueName
             );
 
-            await context.AbandonAllAsync(TimeSpan.Zero);
+            await context.AbandonAllAsync(TimeSpan.Zero, ex, null, null);
             context.Exception = null;
             context.IsHandled = true;
         }
         catch (Exception ex)
         {
-            context.Exception = ex;
+            // ex is System.Reflection.TargetInvocationException, its inner exception is what we want
+            context.Exception = ex.InnerException;
 
             _logger.LogError(
-                ex,
+                context.Exception,
                 "Error processing {Count} message(s) from queue {QueueName}",
                 context.Messages.Count,
                 context.QueueName
@@ -96,15 +81,29 @@ internal sealed class ErrorHandlingMiddleware : IMessageMiddleware
                     context.Messages.Count
                 );
 
-                await DeadletterAllAsync(context, errorHandler, ex.Message, "MaxRetriesExceeded");
+                await DeadletterAllAsync(
+                    context,
+                    errorHandler,
+                    context.Exception,
+                    context.Exception?.Message,
+                    "MaxRetriesExceeded"
+                );
             }
             else
             {
                 // Use the message with the highest delivery count for retry calculation
                 var representativeMessage = context.Messages.MaxBy(m => m.DeliveryCount)!;
-                var delay = retryCalculator.CalculateDelay(representativeMessage, ex);
+                var delay = retryCalculator.CalculateDelay(
+                    representativeMessage,
+                    context.Exception
+                );
 
-                await context.AbandonAllAsync(delay);
+                await context.AbandonAllAsync(
+                    delay,
+                    context.Exception,
+                    context.Exception?.Message,
+                    null
+                );
             }
 
             context.IsHandled = true;
@@ -114,7 +113,8 @@ internal sealed class ErrorHandlingMiddleware : IMessageMiddleware
     private static async Task DeadletterAllAsync(
         MessageContext context,
         MessageErrorHandler errorHandler,
-        string errorMessage,
+        Exception? errorException,
+        string? errorMessage,
         string errorCode
     )
     {
@@ -123,6 +123,7 @@ internal sealed class ErrorHandlingMiddleware : IMessageMiddleware
             await errorHandler.DeadletterAsync(
                 message,
                 context.QueueName,
+                errorException,
                 errorMessage,
                 errorCode,
                 CancellationToken.None
