@@ -69,6 +69,9 @@ public static class BussigHostedServiceExtensions
 
         // Register message receiver for consuming messages
         services.AddSingleton<PostgresMessageReceiver>();
+        services.AddSingleton<IMessageLockRenewer>(sp =>
+            sp.GetRequiredService<PostgresMessageReceiver>()
+        );
 
         // Register built-in middleware (unified pipeline for both single and batch)
         RegisterBuiltInMiddleware(services, configurator.AttachmentsEnabled);
@@ -90,16 +93,21 @@ public static class BussigHostedServiceExtensions
             )
         );
 
+        // Register distributed lock manager
+        services.AddSingleton<IDistributedLockManager, DistributedLockManager>();
+
         // Register consumer factory for creating queue consumers
         services.AddSingleton<QueueConsumerFactory>(provider =>
         {
             var scopeFactory = provider.GetRequiredService<IServiceScopeFactory>();
             var receiver = provider.GetRequiredService<PostgresMessageReceiver>();
+            var lockManager = provider.GetRequiredService<IDistributedLockManager>();
             var loggerFactory = provider.GetRequiredService<ILoggerFactory>();
 
             return new QueueConsumerFactory(
                 scopeFactory,
                 receiver,
+                lockManager,
                 loggerFactory,
                 configurator.GlobalMiddleware,
                 configurator.AttachmentsEnabled

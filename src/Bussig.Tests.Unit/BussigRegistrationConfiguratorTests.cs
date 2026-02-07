@@ -1,4 +1,3 @@
-using System.Reflection;
 using Bussig.Abstractions;
 using Bussig.Abstractions.Messages;
 
@@ -126,6 +125,56 @@ public class BussigRegistrationConfiguratorTests
         }
     }
 
+    [Test]
+    public async Task AddProcessors_WhenSingletonProcessorInterface_SetsSingletonEnabled()
+    {
+        // Arrange
+        var configurator = new BussigRegistrationConfigurator();
+
+        // Act
+        configurator.AddProcessor<SingletonProcessor>();
+
+        // Assert
+        var processor = configurator.ProcessorRegistrations[0];
+        await Assert
+            .That(processor.Options.Polling.SingletonProcessing.EnableSingletonProcessing)
+            .IsTrue();
+    }
+
+    [Test]
+    public async Task AddProcessors_WhenSingletonProcessorOptions_SetsSingletonEnabled()
+    {
+        // Arrange
+        var configurator = new BussigRegistrationConfigurator();
+
+        // Act
+        configurator.AddProcessor<SingletonProcessor>(options =>
+            options.Polling.SingletonProcessing.EnableSingletonProcessing = true
+        );
+
+        // Assert
+        var processor = configurator.ProcessorRegistrations[0];
+        await Assert
+            .That(processor.Options.Polling.SingletonProcessing.EnableSingletonProcessing)
+            .IsTrue();
+    }
+
+    [Test]
+    public async Task AddProcessors_WhenNoSingletonProcessorOptions_SetsSingletonDisabled()
+    {
+        // Arrange
+        var configurator = new BussigRegistrationConfigurator();
+
+        // Act
+        configurator.AddProcessor<SingletonProcessor>();
+
+        // Assert
+        var processor = configurator.ProcessorRegistrations[0];
+        await Assert
+            .That(processor.Options.Polling.SingletonProcessing.EnableSingletonProcessing)
+            .IsTrue();
+    }
+
     // Test message types
     [MessageMapping("test-message")]
     public record TestMessage : IMessage;
@@ -154,6 +203,14 @@ public class BussigRegistrationConfiguratorTests
     {
         public Task ProcessAsync(
             ProcessorContext<Batch<TestMessage>> context,
+            CancellationToken cancellationToken = default
+        ) => Task.CompletedTask;
+    }
+
+    public class SingletonProcessor : IProcessor<TestMessage>, ISingletonProcessor
+    {
+        public Task ProcessAsync(
+            ProcessorContext<TestMessage> context,
             CancellationToken cancellationToken = default
         ) => Task.CompletedTask;
     }

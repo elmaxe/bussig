@@ -94,6 +94,11 @@ public class BussigRegistrationConfigurator : IBussigRegistrationConfigurator
         var options = new ProcessorOptions();
         configure?.Invoke(options);
 
+        if (typeof(ISingletonProcessor).IsAssignableFrom(processorType))
+        {
+            options.Polling.SingletonProcessing.EnableSingletonProcessing = true;
+        }
+
         var queueName = MessageUrn.ForType(queueMessageType).ToString();
 
         _processorRegistrations.Add(

@@ -9,7 +9,7 @@ using NpgsqlTypes;
 
 namespace Bussig;
 
-public sealed class PostgresMessageReceiver
+public sealed class PostgresMessageReceiver : IMessageLockRenewer
 {
     private readonly NpgsqlDataSource _npgsqlDataSource;
     private readonly string _getMessagesSql;
