@@ -1,3 +1,4 @@
+using Bussig.Abstractions;
 using Bussig.Abstractions.Options;
 using Microsoft.Extensions.Logging;
 
@@ -8,13 +9,13 @@ namespace Bussig.Processing.Internal;
 /// </summary>
 internal sealed class MessageLockManager
 {
-    private readonly PostgresMessageReceiver _receiver;
+    private readonly IMessageLockRenewer _renewer;
     private readonly LockOptions _options;
     private readonly ILogger _logger;
 
-    public MessageLockManager(PostgresMessageReceiver receiver, LockOptions options, ILogger logger)
+    public MessageLockManager(IMessageLockRenewer renewer, LockOptions options, ILogger logger)
     {
-        _receiver = receiver;
+        _renewer = renewer;
         _options = options;
         _logger = logger;
     }
@@ -52,7 +53,7 @@ internal sealed class MessageLockManager
                     break;
                 }
 
-                var renewed = await _receiver.RenewLockAsync(
+                var renewed = await _renewer.RenewLockAsync(
                     messageDeliveryId,
                     lockId,
                     _options.Duration,

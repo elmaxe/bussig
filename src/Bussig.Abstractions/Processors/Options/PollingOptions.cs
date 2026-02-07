@@ -22,4 +22,6 @@ public sealed class PollingOptions
     /// Default: 5
     /// </summary>
     public int MaxConcurrency { get; set; } = 5;
+
+    public SingletonProcessingOptions SingletonProcessing { get; set; } = new();
 }

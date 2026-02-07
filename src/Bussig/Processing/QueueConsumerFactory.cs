@@ -1,4 +1,6 @@
+using Bussig.Abstractions;
 using Bussig.Processing.Internal;
+using Bussig.Processing.Internal.Strategies;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
@@ -11,6 +13,7 @@ public sealed class QueueConsumerFactory
 {
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly PostgresMessageReceiver _receiver;
+    private readonly IDistributedLockManager _lockManager;
     private readonly ILoggerFactory _loggerFactory;
     private readonly IReadOnlyList<Type> _globalMiddleware;
     private readonly bool _attachmentsEnabled;
@@ -18,6 +21,7 @@ public sealed class QueueConsumerFactory
     public QueueConsumerFactory(
         IServiceScopeFactory scopeFactory,
         PostgresMessageReceiver receiver,
+        IDistributedLockManager lockManager,
         ILoggerFactory loggerFactory,
         IReadOnlyList<Type> globalMiddleware,
         bool attachmentsEnabled
@@ -25,6 +29,7 @@ public sealed class QueueConsumerFactory
     {
         _scopeFactory = scopeFactory;
         _receiver = receiver;
+        _lockManager = lockManager;
         _loggerFactory = loggerFactory;
         _globalMiddleware = globalMiddleware;
         _attachmentsEnabled = attachmentsEnabled;
@@ -70,6 +75,18 @@ public sealed class QueueConsumerFactory
                 _receiver,
                 logger,
                 concurrencySemaphore
+            );
+        }
+
+        if (registration.Options.Polling.SingletonProcessing.EnableSingletonProcessing)
+        {
+            var singletonOptions = registration.Options.Polling.SingletonProcessing;
+            strategy = new SingletonProcessingStrategy(
+                strategy,
+                _lockManager,
+                registration.QueueName,
+                _loggerFactory.CreateLogger<SingletonProcessingStrategy>(),
+                singletonOptions
             );
         }
 

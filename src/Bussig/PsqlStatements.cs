@@ -43,9 +43,9 @@ public static class PsqlStatements
         """SELECT * FROM "{0}".acquire_lock($1, $2, $3)"""
     );
     public static readonly CompositeFormat ReleaseLock = CompositeFormat.Parse(
-        """SELECT * FROM "{0}".acquire_lock($1, $2)"""
+        """SELECT * FROM "{0}".release_lock($1, $2)"""
     );
     public static readonly CompositeFormat RenewLock = CompositeFormat.Parse(
-        """SELECT * FROM "{0}".acquire_lock($1, $2, $3)"""
+        """SELECT * FROM "{0}".renew_lock($1, $2, $3)"""
     );
 }

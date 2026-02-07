@@ -99,16 +99,15 @@ public class DeserializationMiddlewareTests
         var nextCalled = false;
 
         // Act & Assert
-        var ex = await Assert.ThrowsAsync<DeserializationException>(
-            () =>
-                middleware.InvokeAsync(
-                    context,
-                    _ =>
-                    {
-                        nextCalled = true;
-                        return Task.CompletedTask;
-                    }
-                )
+        var ex = await Assert.ThrowsAsync<DeserializationException>(() =>
+            middleware.InvokeAsync(
+                context,
+                _ =>
+                {
+                    nextCalled = true;
+                    return Task.CompletedTask;
+                }
+            )
         );
 
         await Assert.That(ex!.Message).Contains("null");
@@ -133,16 +132,15 @@ public class DeserializationMiddlewareTests
         var nextCalled = false;
 
         // Act & Assert
-        var ex = await Assert.ThrowsAsync<DeserializationException>(
-            () =>
-                middleware.InvokeAsync(
-                    context,
-                    _ =>
-                    {
-                        nextCalled = true;
-                        return Task.CompletedTask;
-                    }
-                )
+        var ex = await Assert.ThrowsAsync<DeserializationException>(() =>
+            middleware.InvokeAsync(
+                context,
+                _ =>
+                {
+                    nextCalled = true;
+                    return Task.CompletedTask;
+                }
+            )
         );
 
         await Assert.That(ex!.Message).IsEqualTo("Invalid JSON");
@@ -208,8 +206,8 @@ public class DeserializationMiddlewareTests
         ]);
 
         // Act & Assert
-        await Assert.ThrowsAsync<DeserializationException>(
-            () => middleware.InvokeAsync(context, _ => Task.CompletedTask)
+        await Assert.ThrowsAsync<DeserializationException>(() =>
+            middleware.InvokeAsync(context, _ => Task.CompletedTask)
         );
 
         await Assert.That(callCount).IsEqualTo(2);

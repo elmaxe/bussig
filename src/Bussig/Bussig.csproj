@@ -24,5 +24,6 @@
   <ItemGroup>
     <InternalsVisibleTo Include="Bussig.Tests.Unit" />
     <InternalsVisibleTo Include="Bussig.Postgres.Tests.Integration" />
+    <InternalsVisibleTo Include="DynamicProxyGenAssembly2" />
   </ItemGroup>
 </Project>

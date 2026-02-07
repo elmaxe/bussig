@@ -5,7 +5,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using SecurityDriven;
 
-namespace Bussig.Processing.Internal;
+namespace Bussig.Processing.Internal.Strategies;
 
 /// <summary>
 /// Processing strategy for batch message processing.

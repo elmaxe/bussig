@@ -94,7 +94,7 @@ internal sealed class MessageErrorHandler
         );
     }
 
-    public static string BuildErrorHeaders(
+    internal static string BuildErrorHeaders(
         string? existingHeaders,
         Exception? errorException,
         string? errorMessage,
