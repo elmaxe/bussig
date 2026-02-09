@@ -16,5 +16,8 @@
   <Project Path="src/Bussig.Abstractions/Bussig.Abstractions.csproj" />
   <Project Path="src/Bussig.Azure.Storage/Bussig.Azure.Storage.csproj" />
   <Project Path="src/Bussig/Bussig.csproj" />
+  <Project Path="src/Bussig.Outbox.Npgsql/Bussig.Outbox.Npgsql.csproj" />
+  <Project Path="src/Bussig.Outbox.Npgsql.EntityFrameworkCore/Bussig.Outbox.Npgsql.EntityFrameworkCore.csproj" />
+  <Project Path="src/examples/EFCore/EFCore.csproj" />
   <Project Path="src/examples/Playground/Playground.csproj" />
 </Solution>

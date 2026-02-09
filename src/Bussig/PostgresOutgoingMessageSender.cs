@@ -9,7 +9,7 @@ using NpgsqlTypes;
 
 namespace Bussig;
 
-public sealed class PostgresOutgoingMessageSender : IOutgoingMessageSender
+internal sealed class PostgresOutgoingMessageSender : IOutgoingMessageSender
 {
     private readonly NpgsqlDataSource _npgsqlDataSource;
     private readonly IPostgresTransactionAccessor _transactionAccessor;

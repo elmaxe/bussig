@@ -2,13 +2,13 @@ using Npgsql;
 
 namespace Bussig;
 
-public interface IPostgresTransactionAccessor
+internal interface IPostgresTransactionAccessor
 {
     NpgsqlTransaction? CurrentTransaction { get; }
     IDisposable Use(NpgsqlTransaction transaction);
 }
 
-public sealed class PostgresTransactionAccessor : IPostgresTransactionAccessor
+internal sealed class PostgresTransactionAccessor : IPostgresTransactionAccessor
 {
     private static readonly AsyncLocal<NpgsqlTransaction?> Current = new();
 
