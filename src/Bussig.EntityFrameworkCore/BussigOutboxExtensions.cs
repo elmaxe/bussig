@@ -1,23 +1,24 @@
 using Bussig.Abstractions;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
-using Npgsql;
 
-namespace Bussig.Outbox.Npgsql;
+namespace Bussig.EntityFrameworkCore;
 
-public static class NpgsqlOutboxExtensions
+public static class BussigOutboxExtensions
 {
-    public static IServiceCollection AddBussigNpgsqlOutbox(
+    public static OutboxBuilder AddBussigOutbox<TDbContext>(
         this IServiceCollection services,
-        Action<NpgsqlOutboxOptions> configure
+        Action<OutboxOptions>? configure = null
     )
+        where TDbContext : DbContext
     {
-        ArgumentNullException.ThrowIfNull(configure);
-
-        services.AddOptions<NpgsqlOutboxOptions>().Configure(configure);
+        if (configure is not null)
+        {
+            services.AddOptions<OutboxOptions>().Configure(configure);
+        }
 
         // Move the existing IOutgoingMessageSender registration to a keyed service
-        // so the decorator can resolve the original ("inner") sender.
         var existingDescriptor = services.FirstOrDefault(d =>
             d.ServiceType == typeof(IOutgoingMessageSender) && !d.IsKeyedService
         );
@@ -25,7 +26,7 @@ public static class NpgsqlOutboxExtensions
         if (existingDescriptor is null)
         {
             throw new InvalidOperationException(
-                "No IOutgoingMessageSender registration found. Call AddBussig() before AddBussigNpgsqlOutbox()."
+                "No IOutgoingMessageSender registration found. Call AddBussig() before AddBussigOutbox()."
             );
         }
 
@@ -57,30 +58,14 @@ public static class NpgsqlOutboxExtensions
         }
 
         // Register the outbox decorator as the primary IOutgoingMessageSender
-        services.AddSingleton<IOutgoingMessageSender, NpgsqlOutboxSender>();
-
-        // Register a keyed NpgsqlDataSource for the outbox database
-        services.AddKeyedSingleton<NpgsqlDataSource>(
-            OutboxServiceKeys.OutboxNpgsqlDataSource,
-            (provider, _) =>
-            {
-                var options = provider
-                    .GetRequiredService<Microsoft.Extensions.Options.IOptions<NpgsqlOutboxOptions>>()
-                    .Value;
-                return NpgsqlDataSource.Create(options.ConnectionString);
-            }
-        );
+        services.AddSingleton<IOutgoingMessageSender, OutboxSender>();
 
         // Register the transaction context as singleton (AsyncLocal-based)
-        services.TryAddSingleton<NpgsqlOutboxTransactionContext>();
-
-        // Register migrator and migration hosted service
-        services.AddSingleton<NpgsqlOutboxMigrator>();
-        services.AddHostedService<NpgsqlOutboxHostedService>();
+        services.TryAddSingleton<OutboxTransactionContext>();
 
         // Register the forwarder background service
-        services.AddHostedService<NpgsqlOutboxForwarder>();
+        services.AddHostedService<OutboxForwarder<TDbContext>>();
 
-        return services;
+        return new OutboxBuilder(services);
     }
 }

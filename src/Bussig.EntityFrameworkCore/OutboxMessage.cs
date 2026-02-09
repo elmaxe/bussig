@@ -1,4 +1,4 @@
-namespace Bussig.Outbox.Npgsql.EntityFrameworkCore;
+namespace Bussig.EntityFrameworkCore;
 
 public sealed class OutboxMessage
 {

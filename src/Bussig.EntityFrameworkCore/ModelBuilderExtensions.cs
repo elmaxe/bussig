@@ -1,7 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
-namespace Bussig.Outbox.Npgsql.EntityFrameworkCore;
+namespace Bussig.EntityFrameworkCore;
 
 public static class ModelBuilderExtensions
 {

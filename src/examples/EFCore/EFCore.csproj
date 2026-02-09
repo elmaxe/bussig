@@ -6,7 +6,15 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\Bussig.Outbox.Npgsql.EntityFrameworkCore\Bussig.Outbox.Npgsql.EntityFrameworkCore.csproj" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.1">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\Bussig.EntityFrameworkCore\Bussig.EntityFrameworkCore.csproj" />
     <ProjectReference Include="..\..\Bussig\Bussig.csproj" />
   </ItemGroup>
 </Project>

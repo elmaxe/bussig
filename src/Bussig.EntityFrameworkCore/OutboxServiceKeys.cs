@@ -1,7 +1,6 @@
-namespace Bussig.Outbox.Npgsql;
+namespace Bussig.EntityFrameworkCore;
 
 internal static class OutboxServiceKeys
 {
     public const string InnerSender = "BussigOutboxInnerSender";
-    public const string OutboxNpgsqlDataSource = "BussigOutboxNpgsql";
 }
