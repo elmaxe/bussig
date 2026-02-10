@@ -29,24 +29,22 @@ public class AttachmentMiddleware(IMessageAttachmentRepository messageAttachment
             return;
         }
 
-        try
+        // Set up lazy value factories for external addresses
+        foreach (var messageDataProperty in messageDataProperties)
         {
-            foreach (var messageDataProperty in messageDataProperties)
+            var messageData = (MessageData?)
+                messageDataProperty.GetValue(context.DeserializedMessage);
+            if (messageData?.Address is null)
             {
-                var messageData = (MessageData?)
-                    messageDataProperty.GetValue(context.DeserializedMessage);
-                if (messageData?.Address is null)
-                {
-                    continue;
-                }
-
-                var stream = await messageAttachmentRepository.GetAsync(
-                    messageData.Address,
-                    context.CancellationToken
-                );
-                messageData.SetData(stream);
+                continue;
             }
 
+            var address = messageData.Address;
+            messageData.SetValueFactory(ct => messageAttachmentRepository.GetAsync(address, ct));
+        }
+
+        try
+        {
             await nextMiddleware(context);
         }
         finally
@@ -55,12 +53,26 @@ public class AttachmentMiddleware(IMessageAttachmentRepository messageAttachment
             {
                 var messageData = (MessageData?)
                     messageDataProperty.GetValue(context.DeserializedMessage);
-                var stream = messageData?.GetData();
-                if (stream is not null)
+                if (messageData is null)
                 {
-                    await stream.DisposeAsync();
+                    continue;
+                }
+
+                // Dispose stream if it was accessed and completed successfully
+                if (messageData.WasAccessed)
+                {
+                    var cachedTask = messageData.GetCachedValue();
+                    if (cachedTask is { IsCompletedSuccessfully: true })
+                    {
+                        await cachedTask.Result.DisposeAsync();
+                    }
+                }
+
+                // Delete from external storage if it had an address
+                if (messageData.Address is not null)
+                {
                     await messageAttachmentRepository.DeleteAsync(
-                        messageData!.Address!,
+                        messageData.Address,
                         context.CancellationToken
                     );
                 }

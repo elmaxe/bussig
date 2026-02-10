@@ -10,7 +10,7 @@ namespace Bussig.Tests.Unit.Processing.Middleware;
 public class AttachmentMiddlewareTests
 {
     [Test]
-    public async Task InvokeAsync_DownloadsAttachment_WhenMessageHasMessageDataWithAddress()
+    public async Task InvokeAsync_SetsUpLazyLoading_WhenMessageHasMessageDataWithAddress()
     {
         // Arrange
         var address = new Uri("https://test.blob.core.windows.net/container/blob");
@@ -36,10 +36,12 @@ public class AttachmentMiddlewareTests
         // Act
         await middleware.InvokeAsync(
             context,
-            _ =>
+            async _ =>
             {
                 nextCalled = true;
-                return Task.CompletedTask;
+                // Access the attachment lazily during processing
+                var stream = await message.Attachment!.GetValueAsync();
+                await Assert.That(stream).IsNotNull();
             }
         );
 
@@ -50,7 +52,36 @@ public class AttachmentMiddlewareTests
     }
 
     [Test]
-    public async Task InvokeAsync_SkipsDownload_WhenMessageDataHasNoAddress()
+    public async Task InvokeAsync_DoesNotDownload_WhenProcessorDoesNotAccessAttachment()
+    {
+        // Arrange
+        var address = new Uri("https://test.blob.core.windows.net/container/blob");
+
+        var repository = new Mock<IMessageAttachmentRepository>();
+
+        var middleware = new AttachmentMiddleware(repository.Object);
+
+        var message = new TestMessageWithAttachment
+        {
+            Name = "Test",
+            Attachment = new MessageData { Address = address },
+        };
+
+        var context = CreateContext(message);
+
+        // Act - next middleware does NOT access the attachment
+        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+
+        // Assert - GetAsync never called (lazy), but DeleteAsync still called (cleanup)
+        repository.Verify(
+            r => r.GetAsync(It.IsAny<Uri>(), It.IsAny<CancellationToken>()),
+            Times.Never
+        );
+        repository.Verify(r => r.DeleteAsync(address, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Test]
+    public async Task InvokeAsync_SkipsSetup_WhenMessageDataHasNoAddress()
     {
         // Arrange
         var repository = new Mock<IMessageAttachmentRepository>();
@@ -82,10 +113,14 @@ public class AttachmentMiddlewareTests
             r => r.GetAsync(It.IsAny<Uri>(), It.IsAny<CancellationToken>()),
             Times.Never
         );
+        repository.Verify(
+            r => r.DeleteAsync(It.IsAny<Uri>(), It.IsAny<CancellationToken>()),
+            Times.Never
+        );
     }
 
     [Test]
-    public async Task InvokeAsync_SkipsDownload_WhenMessageDataIsNull()
+    public async Task InvokeAsync_SkipsSetup_WhenMessageDataIsNull()
     {
         // Arrange
         var repository = new Mock<IMessageAttachmentRepository>();
@@ -243,7 +278,12 @@ public class AttachmentMiddlewareTests
         {
             await middleware.InvokeAsync(
                 context,
-                _ => throw new InvalidOperationException("Test error")
+                async _ =>
+                {
+                    // Access the attachment then throw
+                    await message.Attachment!.GetValueAsync();
+                    throw new InvalidOperationException("Test error");
+                }
             );
         }
         catch (InvalidOperationException)
@@ -284,13 +324,65 @@ public class AttachmentMiddlewareTests
         var context = CreateContext(message, typeof(TestMessageWithMultipleAttachments));
 
         // Act
-        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+        await middleware.InvokeAsync(
+            context,
+            async _ =>
+            {
+                // Access both attachments
+                await message.Attachment1!.GetValueAsync();
+                await message.Attachment2!.GetValueAsync();
+            }
+        );
 
         // Assert
         repository.Verify(r => r.GetAsync(address1, It.IsAny<CancellationToken>()), Times.Once);
         repository.Verify(r => r.GetAsync(address2, It.IsAny<CancellationToken>()), Times.Once);
         repository.Verify(r => r.DeleteAsync(address1, It.IsAny<CancellationToken>()), Times.Once);
         repository.Verify(r => r.DeleteAsync(address2, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Test]
+    public async Task InvokeAsync_InlineDataWorksDirectly_WithoutRepoCall()
+    {
+        // Arrange
+        var inlineContent = "inline data"u8.ToArray();
+        var repository = new Mock<IMessageAttachmentRepository>();
+
+        var middleware = new AttachmentMiddleware(repository.Object);
+
+        var message = new TestMessageWithAttachment
+        {
+            Name = "Test",
+            Attachment = new MessageData { InlineData = inlineContent },
+        };
+
+        var context = CreateContext(message);
+        byte[]? receivedBytes = null;
+
+        // Act
+        await middleware.InvokeAsync(
+            context,
+            async _ =>
+            {
+                var stream = await message.Attachment!.GetValueAsync();
+                using var ms = new MemoryStream();
+                await stream.CopyToAsync(ms);
+                receivedBytes = ms.ToArray();
+            }
+        );
+
+        // Assert - No repo calls for inline data
+        repository.Verify(
+            r => r.GetAsync(It.IsAny<Uri>(), It.IsAny<CancellationToken>()),
+            Times.Never
+        );
+        repository.Verify(
+            r => r.DeleteAsync(It.IsAny<Uri>(), It.IsAny<CancellationToken>()),
+            Times.Never
+        );
+
+        await Assert.That(receivedBytes).IsNotNull();
+        await Assert.That(receivedBytes!.SequenceEqual(inlineContent)).IsTrue();
     }
 
     private static MessageContext CreateContext(

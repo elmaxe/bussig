@@ -3,13 +3,25 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace Bussig.Attachments;
 
+public class AttachmentOptions
+{
+    public int InlineThreshold { get; set; }
+}
+
 public static class AttachmentExtensions
 {
-    public static void UseAttachments(this IBussigRegistrationConfigurator configurator)
+    public static void UseAttachments(
+        this IBussigRegistrationConfigurator configurator,
+        Action<AttachmentOptions>? configure = null
+    )
     {
         if (configurator is BussigRegistrationConfigurator impl)
         {
             impl.AttachmentsEnabled = true;
+            if (configure is not null)
+            {
+                impl.ConfigureAttachmentOptions = configure;
+            }
         }
     }
 

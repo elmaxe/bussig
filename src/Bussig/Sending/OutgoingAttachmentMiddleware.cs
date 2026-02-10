@@ -1,13 +1,15 @@
 using System.Reflection;
 using Bussig.Abstractions;
 using Bussig.Abstractions.Middleware;
+using Bussig.Attachments;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 
 namespace Bussig.Sending;
 
 /// <summary>
 /// Middleware that uploads MessageData streams to the attachment repository.
-/// Creates new MessageData instances with the Address set.
+/// Creates new MessageData instances with the Address or InlineData set.
 /// </summary>
 internal sealed class OutgoingAttachmentMiddleware : IOutgoingMessageMiddleware
 {
@@ -18,6 +20,9 @@ internal sealed class OutgoingAttachmentMiddleware : IOutgoingMessageMiddleware
     {
         var attachmentRepository =
             context.ServiceProvider.GetRequiredService<IMessageAttachmentRepository>();
+        var options = context
+            .ServiceProvider.GetRequiredService<IOptions<AttachmentOptions>>()
+            .Value;
 
         // Find all MessageData properties on the message
         var messageDataProperties = context
@@ -30,20 +35,43 @@ internal sealed class OutgoingAttachmentMiddleware : IOutgoingMessageMiddleware
         foreach (var property in messageDataProperties)
         {
             var messageData = (MessageData?)property.GetValue(context.Message);
-            if (messageData is null || !messageData.HasData)
+            var stream = messageData?.GetSendStream();
+            if (stream is null)
             {
                 continue;
             }
 
-            // Upload the data and get the address
-            var address = await attachmentRepository.PutAsync(
-                messageData.GetData()!,
-                context,
-                context.CancellationToken
-            );
+            if (options.InlineThreshold > 0)
+            {
+                await using var memoryStream = new MemoryStream();
+                await stream.CopyToAsync(memoryStream, context.CancellationToken);
+                var bytes = memoryStream.ToArray();
 
-            // Create a new MessageData with the address set
-            property.SetValue(context.Message, new MessageData { Address = address });
+                if (bytes.Length <= options.InlineThreshold)
+                {
+                    property.SetValue(context.Message, new MessageData { InlineData = bytes });
+                    continue;
+                }
+
+                // Upload the buffered data
+                var address = await attachmentRepository.PutAsync(
+                    new MemoryStream(bytes),
+                    context,
+                    context.CancellationToken
+                );
+                property.SetValue(context.Message, new MessageData { Address = address });
+            }
+            else
+            {
+                // Upload the data directly and get the address
+                var address = await attachmentRepository.PutAsync(
+                    stream,
+                    context,
+                    context.CancellationToken
+                );
+                await stream.DisposeAsync();
+                property.SetValue(context.Message, new MessageData { Address = address });
+            }
         }
 
         await nextMiddleware(context);
