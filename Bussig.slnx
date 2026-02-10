@@ -11,10 +11,13 @@
   <Folder Name="/Tests/">
     <Project Path="src/Bussig.Azure.Storage.Tests.Integration/Bussig.Azure.Storage.Tests.Integration.csproj" />
     <Project Path="src/Bussig.Tests.Integration/Bussig.Tests.Integration.csproj" />
+    <Project Path="src/Bussig.EntityFrameworkCore.Tests/Bussig.EntityFrameworkCore.Tests.csproj" />
     <Project Path="src/Bussig.Tests.Unit/Bussig.Tests.Unit.csproj" />
   </Folder>
   <Project Path="src/Bussig.Abstractions/Bussig.Abstractions.csproj" />
   <Project Path="src/Bussig.Azure.Storage/Bussig.Azure.Storage.csproj" />
   <Project Path="src/Bussig/Bussig.csproj" />
+  <Project Path="src/Bussig.EntityFrameworkCore/Bussig.EntityFrameworkCore.csproj" />
+  <Project Path="src/examples/EFCore/EFCore.csproj" />
   <Project Path="src/examples/Playground/Playground.csproj" />
 </Solution>
