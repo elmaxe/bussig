@@ -51,13 +51,19 @@ public static class BussigHostedServiceExtensions
             (provider, _) =>
             {
                 var settings = provider.GetRequiredService<IOptions<PostgresSettings>>().Value;
-                var builder = new NpgsqlConnectionStringBuilder(settings.ConnectionString)
+                var connectionStringBuilder = new NpgsqlConnectionStringBuilder(
+                    settings.ConnectionString
+                )
                 {
                     Database = settings.Database,
                     SearchPath = settings.Schema,
                 };
 
-                return NpgsqlDataSource.Create(builder.ToString());
+                var dataSourceBuilder = new NpgsqlDataSourceBuilder(
+                    connectionStringBuilder.ToString()
+                );
+                configurator.ConfigureDataSource?.Invoke(dataSourceBuilder, provider);
+                return dataSourceBuilder.Build();
             }
         );
 
