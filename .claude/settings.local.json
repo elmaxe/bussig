@@ -4,7 +4,9 @@
       "Bash(dotnet test:*)",
       "Bash(dotnet run:*)",
       "Bash(dotnet build:*)",
-      "Bash(dotnet csharpier:*)"
+      "Bash(dotnet csharpier:*)",
+      "WebSearch",
+      "WebFetch(domain:github.com)"
     ]
   }
 }

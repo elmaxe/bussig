@@ -1,8 +1,10 @@
 using Bussig.Abstractions;
 using Bussig.Abstractions.Messages;
 using Bussig.Abstractions.Middleware;
+using Bussig.Attachments;
 using Bussig.Sending;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using Moq;
 
 namespace Bussig.Tests.Unit.Sending;
@@ -67,7 +69,7 @@ public class OutgoingAttachmentMiddlewareTests
         var updatedMessage = (TestMessageWithAttachment)context.Message;
         await Assert.That(updatedMessage.Attachment).IsNotNull();
         await Assert.That(updatedMessage.Attachment!.Address).IsEqualTo(uploadedAddress);
-        await Assert.That(updatedMessage.Attachment.HasData).IsFalse();
+        await Assert.That(updatedMessage.Attachment.GetSendStream()).IsNull();
     }
 
     [Test]
@@ -327,10 +329,138 @@ public class OutgoingAttachmentMiddlewareTests
         );
     }
 
-    private static ServiceProvider CreateServiceProvider(IMessageAttachmentRepository repository)
+    [Test]
+    public async Task InvokeAsync_InlinesSmallPayload_WhenUnderThreshold()
+    {
+        // Arrange
+        var smallContent = "small"u8.ToArray();
+        var repository = new Mock<IMessageAttachmentRepository>();
+        var serviceProvider = CreateServiceProvider(repository.Object, inlineThreshold: 1024);
+
+        var message = new TestMessageWithAttachment
+        {
+            Name = "Test",
+            Attachment = new MessageData(new MemoryStream(smallContent)),
+        };
+
+        var context = CreateContext(message, serviceProvider);
+        var middleware = new OutgoingAttachmentMiddleware();
+
+        // Act
+        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+
+        // Assert - No upload, data inlined
+        repository.Verify(
+            r =>
+                r.PutAsync(
+                    It.IsAny<Stream>(),
+                    It.IsAny<OutgoingMessageContext>(),
+                    It.IsAny<CancellationToken>()
+                ),
+            Times.Never
+        );
+
+        var updatedMessage = (TestMessageWithAttachment)context.Message;
+        await Assert.That(updatedMessage.Attachment).IsNotNull();
+        await Assert
+            .That(updatedMessage.Attachment!.InlineData!.SequenceEqual(smallContent))
+            .IsTrue();
+        await Assert.That(updatedMessage.Attachment.Address).IsNull();
+    }
+
+    [Test]
+    public async Task InvokeAsync_UploadsLargePayload_WhenOverThreshold()
+    {
+        // Arrange
+        var largeContent = new byte[2048];
+        Array.Fill(largeContent, (byte)'x');
+        var uploadedAddress = new Uri("https://test.blob.core.windows.net/container/blob");
+
+        var repository = new Mock<IMessageAttachmentRepository>();
+        repository
+            .Setup(r =>
+                r.PutAsync(
+                    It.IsAny<Stream>(),
+                    It.IsAny<OutgoingMessageContext>(),
+                    It.IsAny<CancellationToken>()
+                )
+            )
+            .ReturnsAsync(uploadedAddress);
+
+        var serviceProvider = CreateServiceProvider(repository.Object, inlineThreshold: 1024);
+
+        var message = new TestMessageWithAttachment
+        {
+            Name = "Test",
+            Attachment = new MessageData(new MemoryStream(largeContent)),
+        };
+
+        var context = CreateContext(message, serviceProvider);
+        var middleware = new OutgoingAttachmentMiddleware();
+
+        // Act
+        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+
+        // Assert - Should upload
+        repository.Verify(
+            r =>
+                r.PutAsync(
+                    It.IsAny<Stream>(),
+                    It.IsAny<OutgoingMessageContext>(),
+                    It.IsAny<CancellationToken>()
+                ),
+            Times.Once
+        );
+
+        var updatedMessage = (TestMessageWithAttachment)context.Message;
+        await Assert.That(updatedMessage.Attachment!.Address).IsEqualTo(uploadedAddress);
+        await Assert.That(updatedMessage.Attachment.InlineData).IsNull();
+    }
+
+    [Test]
+    public async Task InvokeAsync_InlinesPayload_WhenExactlyAtThreshold()
+    {
+        // Arrange
+        var content = new byte[100];
+        Array.Fill(content, (byte)'x');
+        var repository = new Mock<IMessageAttachmentRepository>();
+        var serviceProvider = CreateServiceProvider(repository.Object, inlineThreshold: 100);
+
+        var message = new TestMessageWithAttachment
+        {
+            Name = "Test",
+            Attachment = new MessageData(new MemoryStream(content)),
+        };
+
+        var context = CreateContext(message, serviceProvider);
+        var middleware = new OutgoingAttachmentMiddleware();
+
+        // Act
+        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+
+        // Assert - Should inline (<=)
+        repository.Verify(
+            r =>
+                r.PutAsync(
+                    It.IsAny<Stream>(),
+                    It.IsAny<OutgoingMessageContext>(),
+                    It.IsAny<CancellationToken>()
+                ),
+            Times.Never
+        );
+
+        var updatedMessage = (TestMessageWithAttachment)context.Message;
+        await Assert.That(updatedMessage.Attachment!.InlineData!.SequenceEqual(content)).IsTrue();
+    }
+
+    private static ServiceProvider CreateServiceProvider(
+        IMessageAttachmentRepository repository,
+        int inlineThreshold = 0
+    )
     {
         var services = new ServiceCollection();
         services.AddSingleton(repository);
+        services.Configure<AttachmentOptions>(o => o.InlineThreshold = inlineThreshold);
         return services.BuildServiceProvider();
     }
 

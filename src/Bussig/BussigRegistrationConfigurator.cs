@@ -3,6 +3,7 @@ using Bussig.Abstractions;
 using Bussig.Abstractions.Messages;
 using Bussig.Abstractions.Middleware;
 using Bussig.Abstractions.Options;
+using Bussig.Attachments;
 using Bussig.Processing;
 
 namespace Bussig;
@@ -33,6 +34,11 @@ public class BussigRegistrationConfigurator : IBussigRegistrationConfigurator
     /// Gets whether attachments are enabled.
     /// </summary>
     public bool AttachmentsEnabled { get; internal set; }
+
+    /// <summary>
+    /// Gets the attachment options configuration action.
+    /// </summary>
+    internal Action<AttachmentOptions>? ConfigureAttachmentOptions { get; set; }
 
     public void AddMessage<TMessage>(Action<QueueOptions>? configure = null)
     {

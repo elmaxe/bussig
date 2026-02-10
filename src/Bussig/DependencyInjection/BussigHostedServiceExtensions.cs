@@ -1,4 +1,5 @@
 using Bussig.Abstractions;
+using Bussig.Attachments;
 using Bussig.Configuration;
 using Bussig.Constants;
 using Bussig.Hosting;
@@ -72,6 +73,19 @@ public static class BussigHostedServiceExtensions
         services.AddSingleton<IMessageLockRenewer>(sp =>
             sp.GetRequiredService<PostgresMessageReceiver>()
         );
+
+        // Register attachment options
+        if (configurator.AttachmentsEnabled)
+        {
+            if (configurator.ConfigureAttachmentOptions is not null)
+            {
+                services.Configure(configurator.ConfigureAttachmentOptions);
+            }
+            else
+            {
+                services.Configure<AttachmentOptions>(_ => { });
+            }
+        }
 
         // Register built-in middleware (unified pipeline for both single and batch)
         RegisterBuiltInMiddleware(services, configurator.AttachmentsEnabled);

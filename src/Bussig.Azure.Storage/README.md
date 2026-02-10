@@ -25,7 +25,10 @@ Register the attachment repository during service configuration:
 ```csharp
 services.AddBussig((configurator, services) =>
 {
-    configurator.UseAttachments();
+    configurator.UseAttachments(options =>
+    {
+        options.InlineThreshold = 1024; // Optional: inline payloads ≤ 1KB
+    });
     services.UseAzureBlobStorageAttachments(attachments =>
     {
         attachments.ConnectionString = "UseDevelopmentStorage=true"; // For Azurite
@@ -104,8 +107,8 @@ public class ProcessFileProcessor : IProcessor<ProcessFileCommand>
 {
     public async Task ProcessAsync(ProcessFileCommand message, CancellationToken ct)
     {
-        // The attachment stream is automatically downloaded
-        await using var stream = message.FileContent.OpenRead();
+        // The attachment stream is lazily fetched when accessed
+        await using var stream = await message.FileContent.GetValueAsync(ct);
 
         // Process the file content...
     }
@@ -116,18 +119,53 @@ public class ProcessFileProcessor : IProcessor<ProcessFileCommand>
 
 ### Outgoing Messages
 
-1. When sending a message with `MessageData` containing a stream, the outgoing middleware uploads the data to Azure Blob Storage
-2. The stream is replaced with a URI reference
-3. The message is serialized and sent through the bus with only the URI (not the data)
+1. When sending a message with `MessageData` containing a stream, the outgoing middleware evaluates the payload size against the inline threshold:
+   - **Small payloads** (≤ threshold): Serialized directly as `InlineData` in the message body (no external storage)
+   - **Large payloads** (> threshold): Uploaded to Azure Blob Storage and replaced with an `Address` URI reference
+2. The message is serialized and sent through the bus
 
 ### Incoming Messages
 
-1. When processing a message, the attachment middleware detects `MessageData` properties with URIs
-2. The blob is downloaded from Azure Blob Storage
-3. The stream is available via `MessageData.OpenRead()`
-4. After processing completes, the blob is deleted (if `DeleteConsumedBlobs` is enabled)
+1. When processing a message, the attachment middleware detects `MessageData` properties:
+   - **Inline data**: Available directly from the message body (no download)
+   - **External references**: Download is deferred until `GetValueAsync()` is called (lazy loading)
+2. The stream is downloaded on first access and cached for subsequent calls
+3. After processing completes, external blobs are deleted (if `DeleteConsumedBlobs` is enabled)
 
 ## Features
+
+### Inline Threshold
+
+Configure an inline threshold to avoid external storage round-trips for small payloads:
+
+```csharp
+configurator.UseAttachments(options =>
+{
+    options.InlineThreshold = 4096; // Inline payloads ≤ 4KB
+});
+```
+
+When set, payloads at or below the threshold are serialized directly in the message body as `InlineData`. Larger payloads are uploaded to Azure Blob Storage. Setting the threshold to `0` (default) disables inlining—all attachments use external storage.
+
+**Trade-offs:**
+- **Inline**: Lower latency (no blob storage round-trip), but increases message size in PostgreSQL
+- **External**: Smaller messages in the database, but requires blob storage download (lazy loaded)
+
+### Lazy Loading
+
+Attachments stored in Azure Blob Storage are downloaded lazily—only when you call `GetValueAsync()`. If your processor doesn't access the attachment (e.g., filters messages early), the download never happens:
+
+```csharp
+public async Task ProcessAsync(ProcessFileCommand message, CancellationToken ct)
+{
+    if (message.FileName.EndsWith(".txt"))
+        return; // No download for .txt files
+
+    // Download only happens here, when needed
+    await using var stream = await message.FileContent.GetValueAsync(ct);
+    // ...
+}
+```
 
 ### Compression
 
@@ -156,6 +194,35 @@ public class CustomBlobNameGenerator : IBlobNameGenerator
 // Register before UseAzureBlobStorageAttachments
 services.AddSingleton<IBlobNameGenerator, CustomBlobNameGenerator>();
 ```
+
+## Limitations
+
+### Batch Processing Not Supported
+
+Attachments are **not supported** for batch processors (`IProcessor<Batch<TMessage>>`). If you attempt to process messages with `MessageData` properties in a batch processor, a `NotSupportedException` will be thrown at runtime.
+
+**Workaround:** Use single-message processors for messages that include attachments:
+
+```csharp
+// ✅ Supported - single message processor
+public class ProcessFileProcessor : IProcessor<ProcessFileCommand>
+{
+    public async Task ProcessAsync(ProcessFileCommand message, CancellationToken ct)
+    {
+        await using var stream = await message.FileContent.GetValueAsync(ct);
+        // ...
+    }
+}
+
+// ❌ Not supported - batch processor with attachments
+public class ProcessFileBatchProcessor : IProcessor<Batch<ProcessFileCommand>>
+{
+    // Will throw NotSupportedException if ProcessFileCommand has MessageData
+}
+```
+
+This limitation exists because batch processing optimizes for throughput by processing multiple messages in a single transaction, while attachment management requires individual stream lifecycle handling.
+
 
 ## Local Development
 
