@@ -22,6 +22,8 @@
     </None>
   </ItemGroup>
   <ItemGroup>
+    <InternalsVisibleTo Include="Bussig.Azure.Postgres" />
+    <InternalsVisibleTo Include="Bussig.Azure.Postgres.Tests" />
     <InternalsVisibleTo Include="Bussig.Tests.Unit" />
     <InternalsVisibleTo Include="Bussig.Postgres.Tests.Integration" />
     <InternalsVisibleTo Include="DynamicProxyGenAssembly2" />

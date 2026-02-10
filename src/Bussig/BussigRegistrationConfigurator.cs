@@ -5,6 +5,7 @@ using Bussig.Abstractions.Middleware;
 using Bussig.Abstractions.Options;
 using Bussig.Attachments;
 using Bussig.Processing;
+using Npgsql;
 
 namespace Bussig;
 
@@ -39,6 +40,11 @@ public class BussigRegistrationConfigurator : IBussigRegistrationConfigurator
     /// Gets the attachment options configuration action.
     /// </summary>
     internal Action<AttachmentOptions>? ConfigureAttachmentOptions { get; set; }
+
+    /// <summary>
+    /// Gets the data source builder configuration action.
+    /// </summary>
+    internal Action<NpgsqlDataSourceBuilder, IServiceProvider>? ConfigureDataSource { get; set; }
 
     public void AddMessage<TMessage>(Action<QueueOptions>? configure = null)
     {
