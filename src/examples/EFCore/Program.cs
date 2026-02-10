@@ -8,8 +8,6 @@ using Microsoft.EntityFrameworkCore;
 
 var builder = Host.CreateApplicationBuilder(args);
 
-// TODO: See if we can remove the explicit OutboxTransactionContext
-
 builder
     .Services.AddOptions<PostgresSettings>()
     .Configure(options =>

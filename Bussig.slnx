@@ -11,6 +11,7 @@
   <Folder Name="/Tests/">
     <Project Path="src/Bussig.Azure.Storage.Tests.Integration/Bussig.Azure.Storage.Tests.Integration.csproj" />
     <Project Path="src/Bussig.Tests.Integration/Bussig.Tests.Integration.csproj" />
+    <Project Path="src/Bussig.EntityFrameworkCore.Tests/Bussig.EntityFrameworkCore.Tests.csproj" />
     <Project Path="src/Bussig.Tests.Unit/Bussig.Tests.Unit.csproj" />
   </Folder>
   <Project Path="src/Bussig.Abstractions/Bussig.Abstractions.csproj" />
