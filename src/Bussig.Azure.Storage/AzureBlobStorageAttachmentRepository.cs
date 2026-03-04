@@ -1,4 +1,5 @@
 using System.IO.Compression;
+using System.IO.Pipelines;
 using Azure;
 using Azure.Storage.Blobs;
 using Azure.Storage.Blobs.Models;
@@ -107,23 +108,26 @@ public sealed class AzureBlobStorageAttachmentRepository
 
         if (_options.UseCompression)
         {
-            await using var compressed = new MemoryStream();
-            await using (
-                var compressor = new GZipStream(
-                    compressed,
-                    CompressionLevel.Fastest,
-                    leaveOpen: true
-                )
-            )
-            {
-                await stream.CopyToAsync(compressor, cancellationToken);
-            }
+            var pipe = new Pipe();
+            var compressTask = Task.Run(
+                async () =>
+                {
+                    await using var compressor = new GZipStream(
+                        pipe.Writer.AsStream(),
+                        CompressionLevel.Fastest
+                    );
+                    await stream.CopyToAsync(compressor, cancellationToken);
+                },
+                cancellationToken
+            );
 
-            compressed.Position = 0;
-            await blobClient.UploadAsync(
-                compressed,
-                httpHeaders: blobHttpHeaders,
-                cancellationToken: cancellationToken
+            await Task.WhenAll(
+                blobClient.UploadAsync(
+                    pipe.Reader.AsStream(),
+                    httpHeaders: blobHttpHeaders,
+                    cancellationToken: cancellationToken
+                ),
+                compressTask
             );
 
             return blobClient.Uri;
