@@ -1,3 +1,4 @@
+using Bussig.Abstractions;
 using Bussig.Processing;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -11,12 +12,14 @@ public sealed class BussigHostedService : IHostedService, IAsyncDisposable
     private readonly PostgresQueueCreator _queueCreator;
     private readonly QueueConsumerFactory _consumerFactory;
     private readonly ILogger<BussigHostedService> _logger;
+    private readonly IEnumerable<IBusObserver> _observers;
     private readonly List<QueueConsumer> _consumers = [];
 
     public BussigHostedService(
         BussigRegistrationConfigurator configurator,
         PostgresQueueCreator queueCreator,
         QueueConsumerFactory consumerFactory,
+        IEnumerable<IBusObserver> observers,
         ILogger<BussigHostedService> logger
     )
     {
@@ -24,6 +27,7 @@ public sealed class BussigHostedService : IHostedService, IAsyncDisposable
         _registrations = configurator.ProcessorRegistrations;
         _queueCreator = queueCreator;
         _consumerFactory = consumerFactory;
+        _observers = observers;
         _logger = logger;
     }
 
@@ -33,6 +37,9 @@ public sealed class BussigHostedService : IHostedService, IAsyncDisposable
             "Bussig starting with {ProcessorCount} processor(s)...",
             _registrations.Count
         );
+
+        foreach (var observer in _observers)
+            await observer.PreStartAsync();
 
         // Create queues before starting consumers
         var createdQueues = new HashSet<string>();
@@ -64,6 +71,9 @@ public sealed class BussigHostedService : IHostedService, IAsyncDisposable
             _consumers.Add(consumer);
         }
 
+        foreach (var observer in _observers)
+            await observer.PostStartAsync();
+
         _logger.LogInformation("Bussig started successfully");
     }
 
@@ -71,8 +81,14 @@ public sealed class BussigHostedService : IHostedService, IAsyncDisposable
     {
         _logger.LogInformation("Bussig stopping...");
 
+        foreach (var observer in _observers)
+            await observer.PreStopAsync();
+
         var stopTasks = _consumers.Select(c => c.StopAsync(cancellationToken));
         await Task.WhenAll(stopTasks);
+
+        foreach (var observer in _observers)
+            await observer.PostStopAsync();
 
         _logger.LogInformation("Bussig stopped");
     }

@@ -17,6 +17,9 @@ public static class IServiceCollectionExtensions
             );
         }
         services.AddSingleton<IMessageAttachmentRepository, AzureBlobStorageAttachmentRepository>();
+        services.AddSingleton<IBusObserver>(sp =>
+            (IBusObserver)sp.GetRequiredService<IMessageAttachmentRepository>()
+        );
         if (services.All(x => x.ServiceType != typeof(IBlobNameGenerator)))
         {
             services.AddSingleton<IBlobNameGenerator, BlobNameGenerator>();
